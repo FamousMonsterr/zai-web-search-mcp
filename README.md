@@ -83,13 +83,25 @@ Verified live on **Windows 11 x64** with DeepSeek Harness desktop `0.2.1-rc.5` (
 | 30-day MCP tool-usage API | ✅ works |
 | Host plugin: `/zai-quota` route, credential resolution, web-search provider registration | ✅ works in the Electron host |
 | Client module loads and runs in the renderer (`/zai-quota-diag` lifecycle events) | ✅ confirmed |
-| Quota chip mounted in the Electron composer | ⚠️ does not mount on desktop `0.2.1-rc.5` (slots register without errors; built-in `activity`/`usage` entries render, third-party dock entries do not) — fix pending on the app side |
+| Quota chip mounted in the Electron composer | ✅ works (v1.6.0) — chip renders in the composer stats row, popover shows both windows + MCP calls |
 
 The web-search and MCP-tool surfaces do not depend on the chip and work regardless.
 
+## Screenshots (Windows 11, DeepSeek Harness desktop)
+
+The quota chip sits in the composer stats row next to the context meter:
+
+![Quota chip in the composer stats row](docs/quota-chip.png)
+
+Hovering it opens the usage popover — the 5-hour and weekly credit windows with reset times, plus MCP tool calls in the last 30 days:
+
+![Quota popover](docs/quota-popover.png)
+
+> v1.6.0 mount fix: the chip component no longer calls `setState` during render (that triggered React's "Too many re-renders", and the slot's error boundary silently evicted the entry — the chip vanished before its first effect ran). Visibility is now purely derived; registration mirrors the built-in `activity`/`usage` pills exactly (generator factory, `locale`, order 2) with `dsh.client.immediately: true`.
+
 ## Troubleshooting
 
-- **Chip not visible** — on desktop builds where third-party dock entries do not mount (see the table above) there is nothing to configure; a fix is being worked out with the Harness app side. The quota itself is always available at the host route `/zai-quota` and via `pwsh -NoProfile -File verify.ps1`.
+- **Chip not visible** — make sure you run plugin v1.6.0+ (earlier versions had a render-phase `setState` that made the slot error boundary evict the chip silently) and restart the app after `install.ps1`. The quota itself is always available at the host route `/zai-quota` and via `pwsh -NoProfile -File verify.ps1`.
 - **HTTP 401/403 from Z.ai** — update `ZAI_API_KEY` in the app's Models/credentials surface, then restart.
 - **MCP bridge fails at startup** — non-fatal by design: `web_search` keeps working.
 
@@ -119,4 +131,4 @@ pwsh -NoProfile -File verify.ps1
 
 **Правила для ИИ-агентов** — в [`AGENTS.md`](AGENTS.md) (простой английский): нашли баг или улучшение — открывайте issue/PR по шаблонам, ничего секретного не вставлять, ставить ⭐ звёздочку, даже если просто прочитали репозиторий.
 
-**Проверено на Windows 11** (dsh `0.2.1-rc.5`, плагин v1.5.1): поиск MCP, оба API квот, хост-маршрут `/zai-quota`, загрузка клиентского модуля — всё работает; чип в композере десктоп-сборки пока не монтируется (ограничение приложения, правка готовится — см. таблицу «Tested on Windows» выше).
+**Проверено на Windows 11** (dsh `0.2.1-rc.5`, плагин v1.6.0): поиск MCP, оба API квот, хост-маршрут `/zai-quota` и чип квоты в композере — всё работает, скриншоты выше.

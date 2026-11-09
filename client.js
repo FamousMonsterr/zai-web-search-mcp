@@ -1,13 +1,23 @@
 // Client half of @local/zai-web-search-mcp.
 //
-// Renders a compact Z.ai quota indicator in the composer stats row (next to
-// the context-used ring) that opens a zcode-style "Usage remaining" popover
-// on hover: the 5-hour and weekly credit windows with colored progress bars
-// and reset times, plus the monthly MCP tool call count. Data comes from the
-// Host's /zai-quota route, which reads the real monitoring API with the
-// stored ZAI_API_KEY; the key itself never reaches the browser. The chip
-// shows whenever the quota API is reachable; the snapshot's zaiActive flag
-// (default model provider === "zai") stays available for diagnostics.
+// Renders a compact Z.ai quota chip in the composer stats row (the
+// conversation.composer.dock seat, right after the built-in activity/usage
+// pills) that opens a zcode-style "Usage remaining" popover on hover: the
+// 5-hour and weekly credit windows with colored progress bars and reset
+// times, plus the monthly MCP tool call count. Data comes from the Host's
+// /zai-quota route, which reads the real monitoring API with the stored
+// ZAI_API_KEY; the key itself never reaches the browser.
+//
+// Mount contract notes (verified against this build's slot renderer):
+// - Entries render through a per-entry SlotErrorBoundary that silently
+//   abdicates a component whose render throws. The earlier version called
+//   setOpen(false) unconditionally during render (a render-phase state
+//   update loop) — the component threw "Too many re-renders" before any
+//   effect ran, so the chip vanished with zero quota-fetch diagnostics.
+//   Visibility is now purely derived; no setState during render.
+// - Registration mirrors the built-in stat pills exactly: a generator
+//   injection effect (yield per registration) plus the locale namespace;
+//   `inject` is optional (undefined normalizes to empty props).
 window.__ModuleLoader__.load({
   id: '@local/zai-web-search-mcp',
   factory(require) {
@@ -18,6 +28,7 @@ window.__ModuleLoader__.load({
     const TICK_MS = 30_000
 
     let t = (key) => key
+    let renderBeaconed = false
 
     /** Lifecycle diagnostics: report milestones and failures to the Host route. */
     function diag(event, detail) {
@@ -97,6 +108,11 @@ window.__ModuleLoader__.load({
       const [open, setOpen] = React.useState(false)
       const [, forceTick] = React.useReducer((x) => x + 1, 0)
 
+      if (!renderBeaconed) {
+        renderBeaconed = true
+        diag('component-first-render')
+      }
+
       React.useEffect(() => {
         let alive = true
         const load = () => fetch('/zai-quota')
@@ -124,16 +140,17 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      // Purely derived visibility: no setState during render. Until the first
+      // snapshot arrives the chip renders nothing, and the effect above keeps
+      // running — that is what the previous version broke.
       const usable = data !== null && data.ok === true
       const fiveHour = usable ? data.windows.find((w) => w.kind === 'fiveHour') : undefined
-      if (!usable || fiveHour === undefined) {
-        setOpen(false)
-        return null
-      }
-      const weekly = data.windows.find((w) => w.kind === 'weekly')
+      if (!usable || fiveHour === undefined) return null
+      const weekly = usable ? data.windows.find((w) => w.kind === 'weekly') : undefined
       const mcp = data.mcp ?? null
       const percent = typeof fiveHour.percent === 'number' ? fiveHour.percent : 0
       const tone = toneOf(percent)
+      const popoverOpen = open
 
       return h(React.Fragment, null,
         h(QuotaChipStyle),
@@ -142,7 +159,7 @@ window.__ModuleLoader__.load({
           onMouseEnter: () => setOpen(true),
           onMouseLeave: () => setOpen(false),
         },
-        open ? h('div', { className: 'zaiq-pop', role: 'dialog', 'aria-label': t('label') },
+        popoverOpen ? h('div', { className: 'zaiq-pop', role: 'dialog', 'aria-label': t('label') },
           h('div', { className: 'zaiq-pop-head' },
             h('span', { className: 'zaiq-pop-title' }, t('plan')),
             h('span', { className: 'zaiq-pop-level' }, typeof data.level === 'string' && data.level ? data.level.toUpperCase() : ''),
@@ -169,7 +186,7 @@ window.__ModuleLoader__.load({
           className: `zaiq-trigger ${tone}`.trim(),
           onClick: () => setOpen((value) => !value),
           'aria-label': t('label'),
-          'aria-expanded': open,
+          'aria-expanded': popoverOpen,
           title: t('label'),
         },
         h(Ring, { percent, tone }),
@@ -180,7 +197,7 @@ window.__ModuleLoader__.load({
 
     function QuotaChipStyle() {
       return h('style', null, `
-.zaiq-wrap{position:relative;display:flex;justify-content:flex-end;width:100%}
+.zaiq-wrap{position:relative;display:inline-flex;justify-content:flex-end}
 .zaiq-trigger{display:inline-flex;align-items:center;gap:5px;padding:1px 6px;border:none;background:transparent;border-radius:8px;color:var(--dsw-alias-label-secondary);font-size:12.5px;line-height:20px;cursor:default;font-family:inherit}
 .zaiq-trigger:hover{background:var(--dsw-alias-bg-layer-2)}
 .zaiq-trigger-text{font-variant-numeric:tabular-nums}
@@ -222,7 +239,6 @@ window.__ModuleLoader__.load({
           ctx.locale.register(NS, 'ru', {
             label: 'Квота GLM Coding Plan (Z.ai)',
             'zai-quota': 'Квота GLM Coding Plan (Z.ai)',
-            'zai-quota-right': 'Квота GLM Coding Plan (Z.ai)',
             plan: 'GLM Coding Plan',
             fiveHour: '5 часов',
             weekly: 'Неделя',
@@ -234,7 +250,6 @@ window.__ModuleLoader__.load({
           ctx.locale.register(NS, 'en', {
             label: 'GLM Coding Plan quota (Z.ai)',
             'zai-quota': 'GLM Coding Plan quota (Z.ai)',
-            'zai-quota-right': 'GLM Coding Plan quota (Z.ai)',
             plan: 'GLM Coding Plan',
             fiveHour: '5 hours',
             weekly: 'Weekly',
@@ -249,25 +264,18 @@ window.__ModuleLoader__.load({
           diag('locale-register-failed', error)
         }
         try {
-          // Seats registered exactly like the built-in composer.dock stat
-          // pills (generator factory + locale namespace): a plain arrow
-          // factory without `locale` never mounted on the Electron layout.
+          // Exactly the built-in stat pills' pattern (activity order 0,
+          // usage order 1): generator injection effect, locale namespace,
+          // explicit empty props provider. Order 2 places the chip right
+          // after the usage pill in the same stats row.
+          const chipInject = () => ({})
           ctx.slots.inject('conversation.composer.dock', function* () {
             yield ctx.slots.register({
               name: 'conversation.composer.dock',
               id: 'zai-quota',
-              order: 5,
+              order: 2,
               locale: NS,
-            }, QuotaChip)
-          })
-          // Secondary seat: the standard controls row (before the model
-          // selector), a list slot that renders whenever a session is open.
-          ctx.slots.inject('conversation.input.right', function* () {
-            yield ctx.slots.register({
-              name: 'conversation.input.right',
-              id: 'zai-quota-right',
-              order: 5,
-              locale: NS,
+              inject: chipInject,
             }, QuotaChip)
           })
           diag('slot-registered')

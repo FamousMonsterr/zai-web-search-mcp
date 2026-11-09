@@ -1,0 +1,15 @@
+{
+  "name": "zai-coding-plan-mcp",
+  "version": "1.0.0",
+  "description": "Local MCP server: Z.ai GLM Coding Plan web search (web_search_prime), page reading (webReader) and GitHub repo docs (zread) as MCP tools with your own API key.",
+  "type": "module",
+  "main": "index.js",
+  "bin": { "zai-coding-plan-mcp": "index.js" },
+  "files": ["index.js", "README.md"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/FamousMonsterr/zai-web-search-mcp.git", "directory": "mcp-server" },
+  "homepage": "https://github.com/FamousMonsterr/zai-web-search-mcp#readme",
+  "keywords": ["mcp", "zai", "glm", "web-search", "coding-plan", "web-search-prime", "webreader"],
+  "engines": { "node": ">=18" },
+  "mcpName": "io.github.famousmonsterr/zai-coding-plan-mcp"
+}

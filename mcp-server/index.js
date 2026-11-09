@@ -5,11 +5,9 @@
 // Zero dependencies. Set ZAI_API_KEY in the environment before starting.
 import { createInterface } from 'node:readline'
 
-const KEY = process.env.ZAI_API_KEY
-if (!KEY) {
-  console.error('zai-coding-plan-mcp: set the ZAI_API_KEY environment variable (https://z.ai/manage-apikey/apikey-list)')
-  process.exit(1)
-}
+const KEY = process.env.ZAI_API_KEY ?? ''
+// Start without a key so listing/introspection checks (tools/list) pass;
+// tools/call returns a structured error until ZAI_API_KEY is provided.
 
 const TOOLS = [
   {
@@ -54,6 +52,7 @@ function parseJsonRpcMessage(text) {
 }
 
 async function callUpstream(tool, signal) {
+  if (!KEY) throw new Error('ZAI_API_KEY environment variable is not set (https://z.ai/manage-apikey/apikey-list)')
   const headers = { authorization: `Bearer ${KEY}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' }
   if (!sessions.has(tool.endpoint)) {
     const r = await fetch(tool.endpoint, { method: 'POST', headers: { ...headers }, body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'zai-coding-plan-mcp', version: '1.0.0' } } }), signal })

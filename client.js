@@ -221,6 +221,8 @@ window.__ModuleLoader__.load({
         try {
           ctx.locale.register(NS, 'ru', {
             label: 'Квота GLM Coding Plan (Z.ai)',
+            'zai-quota': 'Квота GLM Coding Plan (Z.ai)',
+            'zai-quota-right': 'Квота GLM Coding Plan (Z.ai)',
             plan: 'GLM Coding Plan',
             fiveHour: '5 часов',
             weekly: 'Неделя',
@@ -231,6 +233,8 @@ window.__ModuleLoader__.load({
           })
           ctx.locale.register(NS, 'en', {
             label: 'GLM Coding Plan quota (Z.ai)',
+            'zai-quota': 'GLM Coding Plan quota (Z.ai)',
+            'zai-quota-right': 'GLM Coding Plan quota (Z.ai)',
             plan: 'GLM Coding Plan',
             fiveHour: '5 hours',
             weekly: 'Weekly',
@@ -245,21 +249,27 @@ window.__ModuleLoader__.load({
           diag('locale-register-failed', error)
         }
         try {
-          const entry = {
-            id: 'zai-quota',
-            order: 100,
-            label: () => t('label'),
-          }
-          // Primary seat: ambient row below the composer card (the stats row).
-          ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
-            name: 'conversation.composer.dock', ...entry,
-          }, QuotaChip))
-          // Secondary seat: full-width row above the composer card, the seat
-          // ui-goal proves renders with an open Session. Telemetry showed the
-          // primary seat registered without mounting on some layouts.
-          ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
-            name: 'conversation.input.dock', ...entry, id: 'zai-quota-input',
-          }, QuotaChip))
+          // Seats registered exactly like the built-in composer.dock stat
+          // pills (generator factory + locale namespace): a plain arrow
+          // factory without `locale` never mounted on the Electron layout.
+          ctx.slots.inject('conversation.composer.dock', function* () {
+            yield ctx.slots.register({
+              name: 'conversation.composer.dock',
+              id: 'zai-quota',
+              order: 5,
+              locale: NS,
+            }, QuotaChip)
+          })
+          // Secondary seat: the standard controls row (before the model
+          // selector), a list slot that renders whenever a session is open.
+          ctx.slots.inject('conversation.input.right', function* () {
+            yield ctx.slots.register({
+              name: 'conversation.input.right',
+              id: 'zai-quota-right',
+              order: 5,
+              locale: NS,
+            }, QuotaChip)
+          })
           diag('slot-registered')
         } catch (error) {
           diag('slot-register-failed', error)

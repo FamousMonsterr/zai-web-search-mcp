@@ -16,7 +16,7 @@ if (key.length === 0) { console.error('FAIL: ZAI_API_KEY not found'); process.ex
 let activeProvider = 'zai'
 const routes = {}
 const registeredProviders = []
-const searchProviders = []
+const fetchProviders = []
 const appliedBridges = []
 const listeners = {}
 
@@ -25,7 +25,7 @@ const mockCtx = {
   loader: { import: async () => ({ apply: async (_ctx, cfg) => { appliedBridges.push(cfg.serverName) } }) },
   web: {
     registerSearchProvider: (p) => { registeredProviders.push(p.id) },
-    registerFetchProvider: (p) => { registeredProviders.push(p.id) },
+    registerFetchProvider: (p) => { fetchProviders.push(p) },
   },
   webServer: { register: (route) => { routes[route.path] = route.handler; return () => {} } },
   logger: { error: (...a) => console.error('[logger]', ...a), warn: () => {}, info: () => {} },
@@ -74,6 +74,15 @@ async function main() {
 
   check('apply: no throw; bridges mounted', appliedBridges.length >= 4, appliedBridges.join(','))
   check('apply: search provider registered', registeredProviders.includes('zai-mcp'))
+
+  // Case 7: fetch provider (web_fetch through the Z.ai reader) - live
+  const reader = fetchProviders.find((p) => p.id === 'zai-reader')
+  check('reader: fetch provider registered', reader !== undefined)
+  if (reader !== undefined) {
+    const fetched = await reader.fetch({ url: 'https://example.com' }, undefined)
+    const bodyText = typeof fetched?.body?.content === 'string' ? fetched.body.content : ''
+    check('reader: live webReader returns content', fetched?.statusCode === 200 && bodyText.length > 50, `status=${fetched?.statusCode} bytes=${bodyText.length}`)
+  }
   check('apply: /zai-quota route registered', typeof routes['/zai-quota'] === 'function')
 
   // Case 1: provider 'zai' -> supported, live API, windows

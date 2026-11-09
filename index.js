@@ -90,7 +90,7 @@ export const PROVIDER_ID = 'zai-mcp'
 const TOOL_NAME = 'web_search_prime'
 
 const PROTOCOL_VERSION = '2025-06-18'
-const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.3' }
+const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.4' }
 /** Retried once per search: a streamable-HTTP session the server dropped. */
 const SESSION_LOST_HTTP = new Set([400, 404])
 
@@ -649,14 +649,28 @@ class ZaiReaderFetch {
   }
 
   async fetch(request, signal) {
-    try {
-      return await this.withLiveSession(signal, async () => await this.callTool(request.url, signal))
-    } catch (error) {
-      if (error instanceof this.WebError) throw error
-      if (isAbortLike(error, signal)) {
-        throw new this.WebError('Z.ai reader aborted', 'WEB_ABORTED', { cause: signal?.aborted === true ? signal.reason : error })
+    // One automatic retry for transient reader failures (observed live: a
+    // tools/call answering with no text block right after a session swap;
+    // the very same URL succeeds on a fresh session).
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.withLiveSession(signal, async () => await this.callTool(request.url, signal))
+      } catch (error) {
+        if (error instanceof this.WebError) throw error
+        if (isAbortLike(error, signal)) {
+          throw new this.WebError('Z.ai reader aborted', 'WEB_ABORTED', { cause: signal?.aborted === true ? signal.reason : error })
+        }
+        const authRejected = error instanceof McpHttpError && (error.status === 401 || error.status === 403)
+        if (attempt === 0 && !authRejected) {
+          this.sessionId = undefined
+          await new Promise((resolve) => {
+            const timer = setTimeout(resolve, 500)
+            signal?.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+          })
+          continue
+        }
+        throw new this.WebError(describeReaderFailure(error, this.endpoint), 'WEB_PROVIDER_ERROR', { cause: error })
       }
-      throw new this.WebError(describeReaderFailure(error, this.endpoint), 'WEB_PROVIDER_ERROR', { cause: error })
     }
   }
 
@@ -709,7 +723,10 @@ class ZaiReaderFetch {
     const result = message.result
     const block = (result?.content ?? []).find((b) => b.type === 'text' && typeof b.text === 'string')
     if (result?.isError === true || block === undefined) {
-      const detail = block !== undefined ? `: ${block.text.slice(0, 300)}` : ''
+      // Carry the wire shape in the detail: a blockless error answer is
+      // otherwise undebuggable from the conversation text.
+      const blocks = (result?.content ?? []).map((b) => b.type).join(',') || 'none'
+      const detail = block !== undefined ? `: ${block.text.slice(0, 300)}` : ` (isError=${String(result?.isError)}; blocks=${blocks})`
       throw new McpEndpointError(`Z.ai reader tool returned an error result${detail}`)
     }
     const payload = parseJsonObjectPayload(block.text)
@@ -858,6 +875,7 @@ function isAbortLike(error, signal) {
 function searchAbortedLike(WebError, signal) {
   return new WebError('Z.ai search aborted', 'WEB_ABORTED', { cause: signal?.aborted === true ? signal.reason : undefined })
 }
+
 
 
 

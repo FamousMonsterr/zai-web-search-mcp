@@ -17,12 +17,3 @@
   config:
     searchProvider: zai-mcp
     fetchProvider: zai-reader
-# Session reading gate: the base mounts ctx.sessionQuery dormant
-# (openAt: never -> SESSION_QUERY_SEARCH_DISABLED). Lift it permanently:
-# open the SQLite index at startup over a durable file next to the
-# session store instead of the base's ephemeral in-memory database.
-- id: session-query-sqlite
-  name: '@deepseek-ai/dsh-session-query-sqlite'
-  config:
-    path: !!js dshHomePath('cache', 'session-query.sqlite')
-    openAt: startup

@@ -64,10 +64,35 @@ window.__ModuleLoader__.load({
         : date.toLocaleDateString(locale, { day: 'numeric', month: 'short' })
     }
 
+    /** zcode format: "Nov 9, 17:55" — short date, comma, 24h clock, app locale. */
+    function fmtResetAt(at) {
+      if (!(at > 0)) return '—'
+      const date = new Date(at)
+      const locale = appLocale !== undefined && typeof appLocale === 'string' && appLocale.length > 0 ? [appLocale] : undefined
+      const day = date.toLocaleDateString(locale, { day: 'numeric', month: 'short' })
+      const time = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false })
+      return `${day}, ${time}`
+    }
+
+    /** "11/9/26, 7:30 PM"-style freshness stamp for the popover footer. */
+    function fmtRefreshed(at) {
+      if (!(at > 0)) return '—'
+      const locale = appLocale !== undefined && typeof appLocale === 'string' && appLocale.length > 0 ? [appLocale] : undefined
+      return new Date(at).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })
+    }
+
+    /** zcode semantics: every shown percent is the REMAINING share. */
+    function remainingPercent(w) {
+      if (typeof w?.limit !== 'number' || w.limit <= 0) return null
+      const remaining = typeof w.remaining === 'number' ? w.remaining : Math.max(0, w.limit - (w.used ?? 0))
+      return Math.max(0, Math.min(100, Math.round((remaining / w.limit) * 100)))
+    }
+
+    /** Tone keys off the remaining share: little left = warning colors. */
     function toneOf(percent) {
       if (typeof percent !== 'number') return ''
-      if (percent >= 90) return 'zaiq-critical'
-      if (percent >= 60) return 'zaiq-warn'
+      if (percent <= 10) return 'zaiq-critical'
+      if (percent <= 40) return 'zaiq-warn'
       return ''
     }
 
@@ -92,14 +117,13 @@ window.__ModuleLoader__.load({
       }))
     }
 
-    /** One quota column in the popover: label, bold value with reset time, colored bar. */
+    /** One quota column in the popover: label, bold "99% Nov 9, 17:55", colored bar of the remaining share. */
     function WindowColumn({ label, percent, resetAt, barClass }) {
       const tone = toneOf(percent)
       return h('div', { className: 'zaiq-col' },
         h('div', { className: 'zaiq-col-label' }, label),
         h('div', { className: 'zaiq-col-value' },
-          h('span', { className: `zaiq-col-percent ${tone}`.trim() }, `${percent ?? 0}%`),
-          h('span', { className: 'zaiq-col-dot' }, '·'),
+          h('span', { className: `zaiq-col-percent ${tone}`.trim() }, `${percent ?? 0}% `),
           h('span', { className: 'zaiq-col-reset' }, fmtResetAt(resetAt)),
         ),
         h('div', { className: 'zaiq-bar' },
@@ -152,7 +176,7 @@ window.__ModuleLoader__.load({
       if (!usable || fiveHour === undefined) return null
       const weekly = usable ? data.windows.find((w) => w.kind === 'weekly') : undefined
       const mcp = data.mcp ?? null
-      const percent = typeof fiveHour.percent === 'number' ? fiveHour.percent : 0
+      const percent = remainingPercent(fiveHour) ?? 0
       const tone = toneOf(percent)
       const popoverOpen = open
 
@@ -165,25 +189,27 @@ window.__ModuleLoader__.load({
         },
         popoverOpen ? h('div', { className: 'zaiq-pop', role: 'dialog', 'aria-label': t('label') },
           h('div', { className: 'zaiq-pop-head' },
-            h('span', { className: 'zaiq-pop-title' }, t('plan')),
+            h('span', { className: 'zaiq-pop-title' }, t('title')),
             h('span', { className: 'zaiq-pop-level' }, typeof data.level === 'string' && data.level ? data.level.toUpperCase() : ''),
           ),
           h('div', { className: 'zaiq-pop-grid' },
-            h(WindowColumn, { label: t('fiveHour'), percent: fiveHour.percent, resetAt: fiveHour.nextResetAt, barClass: 'zaiq-bar-fill-blue' }),
+            h(WindowColumn, { label: t('fiveHour'), percent: remainingPercent(fiveHour), resetAt: fiveHour.nextResetAt, barClass: 'zaiq-bar-fill-blue' }),
             weekly !== undefined
-              ? h(WindowColumn, { label: t('weekly'), percent: weekly.percent, resetAt: weekly.nextResetAt, barClass: 'zaiq-bar-fill-green' })
+              ? h(WindowColumn, { label: t('weekly'), percent: remainingPercent(weekly), resetAt: weekly.nextResetAt, barClass: 'zaiq-bar-fill-green' })
               : null,
             h('div', { className: 'zaiq-col' },
               h('div', { className: 'zaiq-col-label' }, t('mcpMonth')),
               h('div', { className: 'zaiq-col-value' },
                 h('span', { className: 'zaiq-col-percent zaiq-mcp-count' }, mcp !== null ? String(mcp.calls) : '—'),
-                mcp !== null ? h('span', { className: 'zaiq-col-dot' }, '·') : null,
-                mcp !== null ? h('span', { className: 'zaiq-col-reset' }, t('calls')) : null,
+                mcp !== null ? h('span', { className: 'zaiq-col-reset' }, ` ${t('calls')}`) : null,
               ),
               h('div', { className: 'zaiq-mcp-note' }, t('mcpNote')),
             ),
           ),
-          data.stale === true ? h('div', { className: 'zaiq-pop-stale' }, t('stale')) : null,
+          h('div', { className: 'zaiq-pop-foot' },
+            h('span', null, `${t('lastRefreshed')}: ${fmtRefreshed(data.fetchedAt)}`),
+            data.stale === true ? h('span', { className: 'zaiq-pop-stale' }, t('stale')) : null,
+          ),
         ) : null,
         h('button', {
           type: 'button',
@@ -206,7 +232,7 @@ window.__ModuleLoader__.load({
 .zaiq-trigger:hover{background:var(--dsw-alias-bg-layer-2)}
 .zaiq-trigger-text{font-variant-numeric:tabular-nums}
 .zaiq-ring-track{stroke:var(--dsw-alias-border-l2)}
-.zaiq-ring-arc{stroke:var(--dsw-alias-brand-primary)}
+.zaiq-ring-arc{stroke:var(--dsw-alias-state-success-primary)}
 .zaiq-ring.zaiq-warn .zaiq-ring-arc{stroke:var(--dsw-alias-state-warn-primary)}
 .zaiq-ring.zaiq-critical .zaiq-ring-arc{stroke:var(--dsw-alias-state-error-primary)}
 .zaiq-trigger.zaiq-warn .zaiq-trigger-text{color:var(--dsw-alias-state-warn-primary)}
@@ -231,7 +257,8 @@ window.__ModuleLoader__.load({
 .zaiq-bar-fill-blue.zaiq-warn,.zaiq-bar-fill-green.zaiq-warn{background:var(--dsw-alias-state-warn-primary)}
 .zaiq-bar-fill-blue.zaiq-critical,.zaiq-bar-fill-green.zaiq-critical{background:var(--dsw-alias-state-error-primary)}
 .zaiq-mcp-note{font-size:11px;color:var(--dsw-alias-label-secondary);line-height:1.3}
-.zaiq-pop-stale{margin-top:10px;font-size:11px;color:var(--dsw-alias-state-warn-primary)}
+.zaiq-pop-foot{margin-top:12px;display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:11px;color:var(--dsw-alias-label-secondary)}
+.zaiq-pop-stale{font-size:11px;color:var(--dsw-alias-state-warn-primary)}
 `)
     }
 
@@ -241,34 +268,40 @@ window.__ModuleLoader__.load({
         diag('apply-started')
         try {
           ctx.locale.register(NS, 'ru', {
-            label: 'Квота GLM Coding Plan (Z.ai)',
-            'zai-quota': 'Квота GLM Coding Plan (Z.ai)',
+            label: 'Остаток квоты GLM Coding Plan (Z.ai)',
+            'zai-quota': 'Остаток квоты GLM Coding Plan (Z.ai)',
+            title: 'Остаток квоты',
             plan: 'GLM Coding Plan',
-            fiveHour: '5 часов',
-            weekly: 'Неделя',
-            mcpMonth: 'MCP · 30 дней',
+            fiveHour: 'Остаток: 5 часов',
+            weekly: 'Остаток: неделя',
+            mcpMonth: 'Z.ai MCP',
+            lastRefreshed: 'Обновлено',
             calls: 'вызовов',
             mcpNote: 'вызовы MCP-инструментов за 30 дней',
             stale: 'данные устарели — нет связи с Z.ai',
           })
           ctx.locale.register(NS, 'en', {
-            label: 'GLM Coding Plan quota (Z.ai)',
-            'zai-quota': 'GLM Coding Plan quota (Z.ai)',
+            label: 'GLM Coding Plan quota remaining (Z.ai)',
+            'zai-quota': 'GLM Coding Plan quota remaining (Z.ai)',
+            title: 'Quota remaining',
             plan: 'GLM Coding Plan',
-            fiveHour: '5 hours',
-            weekly: 'Weekly',
-            mcpMonth: 'MCP · 30 days',
+            fiveHour: '5-hour remaining',
+            weekly: 'Weekly remaining',
+            mcpMonth: 'Z.ai MCP',
+            lastRefreshed: 'Last refreshed',
             calls: 'calls',
             mcpNote: 'MCP tool calls in the last 30 days',
             stale: 'data is stale — Z.ai is unreachable',
           })
           ctx.locale.register(NS, 'zh', {
-            label: 'GLM Coding Plan 配额 (Z.ai)',
-            'zai-quota': 'GLM Coding Plan 配额 (Z.ai)',
+            label: 'GLM Coding Plan 剩余额度 (Z.ai)',
+            'zai-quota': 'GLM Coding Plan 剩余额度 (Z.ai)',
+            title: '剩余额度',
             plan: 'GLM Coding Plan',
-            fiveHour: '5 小时',
-            weekly: '每周',
-            mcpMonth: 'MCP · 30 天',
+            fiveHour: '5 小时剩余',
+            weekly: '每周剩余',
+            mcpMonth: 'Z.ai MCP',
+            lastRefreshed: '上次刷新',
             calls: '次调用',
             mcpNote: '过去 30 天的 MCP 工具调用次数',
             stale: '数据已过期 — 无法连接 Z.ai',

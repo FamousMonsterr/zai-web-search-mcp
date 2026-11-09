@@ -76,7 +76,7 @@ export const PROVIDER_ID = 'zai-mcp'
 const TOOL_NAME = 'web_search_prime'
 
 const PROTOCOL_VERSION = '2025-06-18'
-const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.8.2' }
+const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.8.3' }
 /** Retried once per search: a streamable-HTTP session the server dropped. */
 const SESSION_LOST_HTTP = new Set([400, 404])
 
@@ -740,3 +740,4 @@ function isAbortLike(error, signal) {
 function searchAbortedLike(WebError, signal) {
   return new WebError('Z.ai search aborted', 'WEB_ABORTED', { cause: signal?.aborted === true ? signal.reason : undefined })
 }
+

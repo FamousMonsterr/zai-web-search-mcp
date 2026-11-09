@@ -34,13 +34,23 @@ copy the Queue column, swap names/links. Last full sweep: 2026-11-09 (v1.8.0).
 
 ## 📋 Queue (not started, free)
 
-- Official MCP Registry — add `server.json` + `npx mcp-publisher login github && npx mcp-publisher publish server.json` (device-flow GitHub auth)
+- Official MCP Registry — add `server.json` + `npx mcp-publisher login github && npx mcp-publisher publish server.json` (device-flow GitHub auth). Feeds API Tracker, Glama, MCP Market and most aggregators at once — do FIRST. Namespace: `io.github.famousmonsterr/...` (org namespaces broken from CLI)
 - GitHub MCP Registry (github.com/mcp) — new 2026 official catalog
-- Smithery — add `smithery.yaml`, `npx -y @smithery/cli publish` (GitHub sign-in at smithery.ai for API key)
+- **API Tracker** (apitracker.io) — 165k results; free submit form, manual review — cross-check from Apideck
+- **Microsoft MCP Center** — comment on GitHub issue at Azure/mcp-center (109 curated, 1–2 weeks onboarding) — cross-check from Apideck
+- **Prowl** — claim-by-domain agent index — cross-check from Apideck
 - SourceForge listing (DR~93, OSS-fit)
 - ModelScope MCP / linux.do / V2EX / Juejin / OSChina — CN block (email codes needed)
 - AlternativeTo "suggest application" (angle: alternative to paid search MCPs)
 - e2b-dev/awesome-ai-agents, BehiSecc/awesome-claude-skills, awesome-mcp-devtools PRs
+
+## ⚠ Corrections from Apideck cross-check (2026-10-31 data)
+
+- Smithery: CLI publish/accounts were shut down on Oct 31 2026 (Arcade acquisition) — it is now a plain directory; do NOT chase smithery.yaml publishing. Remove `run.tools`/`smithery.ai` URLs from client configs everywhere.
+- awesome-mcp-servers CI prefers entries that are already listed on **Glama with a score badge** — our PR #19030 may be asked for that; Glama listing needs glama.json in repo root with maintainer usernames (repo is under a personal account — claim flow differs).
+- MCP Market may already auto-list us from GitHub ("unclaimed") — claim it after the free-queue review.
+- modelcontextprotocol/servers third-party list is RETIRED — do not PR there.
+- goose extensions directory is closed — moving to the official registry.
 
 ## ⏸ Skipped (with reason)
 

@@ -199,7 +199,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function QuotaChip() {
+    function QuotaChip(props) {
       const [data, setData] = React.useState(null)
       const [open, setOpen] = React.useState(false)
       const [, forceTick] = React.useReducer((x) => x + 1, 0)
@@ -208,6 +208,15 @@ window.__ModuleLoader__.load({
       if (!renderBeaconed) {
         renderBeaconed = true
         diag('component-first-render')
+        try {
+          diag('chip-props', Object.keys(props ?? {}).join(',') || 'none')
+          const sample = {}
+          for (const key of Object.keys(props ?? {}).slice(0, 12)) {
+            const value = props[key]
+            sample[key] = typeof value === 'function' ? 'fn' : value === null || value === undefined ? String(value) : Array.isArray(value) ? `arr(${value.length})` : typeof value === 'object' ? `obj(${Object.keys(value).slice(0, 6).join('|')})` : String(value).slice(0, 40)
+          }
+          diag('chip-props-sample', JSON.stringify(sample))
+        } catch (error) { diag('chip-props-failed', error) }
       }
 
       React.useEffect(() => {

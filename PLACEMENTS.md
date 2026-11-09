@@ -34,6 +34,7 @@ copy the Queue column, swap names/links. Last full sweep: 2026-11-09 (v1.8.0).
 | mcp.so | /submit — URL field rejects automation input, submit by hand |
 | claude.com/marketplace | Cloudflare gate — submit by hand (plugin dir: claude-code-plugin/) |
 | OpenTools | https://opentools.ai — submit pending sign-in state check |
+| Glama | https://glama.ai/mcp/servers — "Add MCP server" → repo URL → attach root Dockerfile; score badge auto-renders (PR #19030 already carries the badge markup) |
 
 ## 📋 Queue (not started, free)
 

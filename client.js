@@ -27,8 +27,53 @@ window.__ModuleLoader__.load({
     const POLL_MS = 60_000
     const TICK_MS = 30_000
 
-    let t = (key) => key
-    let appLocale
+    /** Self-contained dictionaries: rendering never depends on the host
+     * locale service resolving our namespace (ctx.locale.bind once returned
+     * raw keys on a live page); the app language only picks the dict. */
+    const DICTS = {
+      en: {
+        label: 'GLM Coding Plan quota remaining (Z.ai)',
+        title: 'Quota remaining',
+        fiveHour: '5-hour remaining',
+        weekly: 'Weekly remaining',
+        mcpMonth: 'Z.ai MCP',
+        lastRefreshed: 'Last refreshed',
+        calls: 'calls',
+        mcpNote: 'MCP tool calls in the last 30 days',
+        stale: 'data is stale — Z.ai is unreachable',
+      },
+      ru: {
+        label: 'Остаток квоты GLM Coding Plan (Z.ai)',
+        title: 'Остаток квоты',
+        fiveHour: 'Остаток: 5 часов',
+        weekly: 'Остаток: неделя',
+        mcpMonth: 'Z.ai MCP',
+        lastRefreshed: 'Обновлено',
+        calls: 'вызовов',
+        mcpNote: 'вызовы MCP-инструментов за 30 дней',
+        stale: 'данные устарели — нет связи с Z.ai',
+      },
+      zh: {
+        label: 'GLM Coding Plan 剩余额度 (Z.ai)',
+        title: '剩余额度',
+        fiveHour: '5 小时剩余',
+        weekly: '每周剩余',
+        mcpMonth: 'Z.ai MCP',
+        lastRefreshed: '上次刷新',
+        calls: '次调用',
+        mcpNote: '过去 30 天的 MCP 工具调用次数',
+        stale: '数据已过期 — 无法连接 Z.ai',
+      },
+    }
+    let appLocale = 'en'
+    /** Adopt any locale shape: 'ru', 'ru-RU', {active}, {active:{id}}. */
+    function pickLocale(value) {
+      if (typeof value !== 'string' && value?.active !== undefined) value = typeof value.active === 'string' ? value.active : value.active?.id
+      if (typeof value !== 'string' || value.length === 0) return
+      const short = value.split('-')[0]
+      if (DICTS[short] !== undefined) appLocale = short
+    }
+    let t = (key) => DICTS[appLocale][key] ?? DICTS.en[key] ?? key
     let renderBeaconed = false
 
     /** Lifecycle diagnostics: report milestones and failures to the Host route. */
@@ -267,51 +312,10 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         diag('apply-started')
         try {
-          ctx.locale.register(NS, 'ru', {
-            label: 'Остаток квоты GLM Coding Plan (Z.ai)',
-            'zai-quota': 'Остаток квоты GLM Coding Plan (Z.ai)',
-            title: 'Остаток квоты',
-            plan: 'GLM Coding Plan',
-            fiveHour: 'Остаток: 5 часов',
-            weekly: 'Остаток: неделя',
-            mcpMonth: 'Z.ai MCP',
-            lastRefreshed: 'Обновлено',
-            calls: 'вызовов',
-            mcpNote: 'вызовы MCP-инструментов за 30 дней',
-            stale: 'данные устарели — нет связи с Z.ai',
-          })
-          ctx.locale.register(NS, 'en', {
-            label: 'GLM Coding Plan quota remaining (Z.ai)',
-            'zai-quota': 'GLM Coding Plan quota remaining (Z.ai)',
-            title: 'Quota remaining',
-            plan: 'GLM Coding Plan',
-            fiveHour: '5-hour remaining',
-            weekly: 'Weekly remaining',
-            mcpMonth: 'Z.ai MCP',
-            lastRefreshed: 'Last refreshed',
-            calls: 'calls',
-            mcpNote: 'MCP tool calls in the last 30 days',
-            stale: 'data is stale — Z.ai is unreachable',
-          })
-          ctx.locale.register(NS, 'zh', {
-            label: 'GLM Coding Plan 剩余额度 (Z.ai)',
-            'zai-quota': 'GLM Coding Plan 剩余额度 (Z.ai)',
-            title: '剩余额度',
-            plan: 'GLM Coding Plan',
-            fiveHour: '5 小时剩余',
-            weekly: '每周剩余',
-            mcpMonth: 'Z.ai MCP',
-            lastRefreshed: '上次刷新',
-            calls: '次调用',
-            mcpNote: '过去 30 天的 MCP 工具调用次数',
-            stale: '数据已过期 — 无法连接 Z.ai',
-          })
-          t = ctx.locale.bind(NS)
-          const snapshot = ctx.locale.getLocale()
-          const active = typeof snapshot === 'string' ? snapshot : snapshot?.active
-          const localeId = typeof active === 'string' ? active : active?.id ?? snapshot?.id
-          if (typeof localeId === 'string' && localeId.length > 0) appLocale = localeId
-          diag('locale-registered')
+          pickLocale(ctx.locale.getLocale())
+          ctx.on('locale/change', (snapshot) => { pickLocale(snapshot) })
+          for (const [lang, dict] of Object.entries(DICTS)) ctx.locale.register(NS, lang, dict)
+          diag(`locale-ready app=${appLocale}`)
         } catch (error) {
           diag('locale-register-failed', error)
         }

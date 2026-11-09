@@ -30,7 +30,7 @@ copy the Queue column, swap names/links. Last full sweep: 2026-11-09 (v1.8.0).
 | ComposioHQ/awesome-claude-skills PR | branch pushed: https://github.com/ComposioHQ/awesome-claude-skills/compare/master...FamousMonsterr:awesome-claude-skills:add-zai-web-search |
 | hesreallyhim/awesome-claude-code PR | branch pushed: https://github.com/hesreallyhim/awesome-claude-code/compare/main...FamousMonsterr:awesome-claude-code:add-zai-web-search-mcp |
 | DevHunt | https://devhunt.org/account/tools/new — form filled, needs 1 screenshot upload |
-| Agensi (paid-skip) | draft at /dashboard/submit — publish only if we ever go paid |
+| ~~Agensi~~ | **SKIPPED — Stripe-payout marketplace, we ship free-only.** Draft left unpublished at /dashboard/submit |
 | mcp.so | /submit — URL field rejects automation input, submit by hand |
 | claude.com/marketplace | Cloudflare gate — submit by hand (plugin dir: claude-code-plugin/) |
 | OpenTools | https://opentools.ai — submit pending sign-in state check |
@@ -61,7 +61,7 @@ copy the Queue column, swap names/links. Last full sweep: 2026-11-09 (v1.8.0).
 - PulseMCP — submissions paused Nov 2026
 - Docker MCP Catalog — requires verified containers
 - Composio toolkits, Trae — curated by vendor
-- SkillHQ / Sigrix / Agensi — paid marketplaces (we ship free; revisit only if paid tiers appear)
+- SkillHQ / Sigrix / Agensi — paid, Stripe-based payouts/kyc (we ship free; not using)
 - G2 / Capterra / aitools.fyi ($30) / BetaList — wrong audience or paid
 - Windsurf / Roo Code — no directory / shut down
 

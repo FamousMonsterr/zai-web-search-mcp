@@ -135,6 +135,7 @@ Verified live on **Windows 11 x64** with DeepSeek Harness desktop `0.2.2-rc.1` (
 | `plugin_manager install_bundle dsh-zai-web-search-mcp@1.8.1` | ✅ installs from npm, bundle auto-activates via `dsh.bundle.patch`, no manual profile edits |
 | All MCP bridges after the npm install | ✅ 14 tools: `web_search_prime`, `webReader`, 8× vision, 3× zread |
 | `/zai-quota` route + built-in `web_search` through `zai-mcp` | ✅ live quota windows; real search results |
+| Quota popover in the zcode "Quota remaining" format (issue #2: strings on ru-RU/en-US/zh-CN hosts, adaptive width, label wrap, edge-flip) | ✅ verified live in English and Russian UIs — remaining-share percents, "Nov 9, 22:55" / "9 нояб., 22:55" app-locale dates, Last-refreshed footer |
 | Side-by-side with the dev `@local` link | ✅ tested; the duplicate was cleanly removable via `remove_bundle` |
 
 The web-search and MCP-tool surfaces do not depend on the chip and work regardless.

@@ -29,7 +29,7 @@ copy the Queue column, swap names/links. Last full sweep: 2026-11-09 (v1.8.0).
 | MCP Market | https://mcpmarket.com/submit — form filled, needs email famousmonster@ya.ru + inbox confirm |
 | ComposioHQ/awesome-claude-skills PR | branch pushed: https://github.com/ComposioHQ/awesome-claude-skills/compare/master...FamousMonsterr:awesome-claude-skills:add-zai-web-search |
 | hesreallyhim/awesome-claude-code PR | branch pushed: https://github.com/hesreallyhim/awesome-claude-code/compare/main...FamousMonsterr:awesome-claude-code:add-zai-web-search-mcp |
-| DevHunt | https://devhunt.org/account/tools/new — form filled, needs 1 screenshot upload |
+| DevHunt | https://devhunt.org/account/tools/new — FORM 100% FILLED and saved; only manual step: upload any screenshot (repo has docs/quota-chip.png, docs/quota-popover.png) and press submit |
 | ~~Agensi~~ | **SKIPPED — Stripe-payout marketplace, we ship free-only.** Draft left unpublished at /dashboard/submit |
 | mcp.so | /submit — URL field rejects automation input, submit by hand |
 | claude.com/marketplace | Cloudflare gate — submit by hand (plugin dir: claude-code-plugin/) |

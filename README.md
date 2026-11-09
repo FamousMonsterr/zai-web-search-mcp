@@ -33,6 +33,32 @@ This plugin targets the **international** Z.ai endpoint `https://api.z.ai` — i
 - Zero npm dependencies; installs as a `link:` bundle into the dsh profile.
 - The vision surface spawns the local `@z_ai/mcp-server` through `npx` (stdio) and needs **Node.js >= 22 and `npx` on the PATH** of the dsh host process; a cold npx cache can exceed the MCP negotiation timeout — prewarm once with `Z_AI_API_KEY=<key> npx -y @z_ai/mcp-server@latest`. Every MCP bridge failure is non-fatal: search/reader providers and the quota chip keep working.
 
+## Quota adapters (contributions welcome)
+
+The quota chip follows the **active default-model provider**: it renders only while a provider has a registered quota adapter, and hides when you switch to any other model. Adapters live in `index.js` (`QUOTA_ADAPTERS`, keyed by the dsh llm provider id) and never expose API keys to the browser — the host serves the parsed snapshot only. Today `zai` (GLM Coding Plan, via the Z.ai monitoring API) is implemented. Adding your service is one entry:
+
+```js
+// provider id = the harness llm provider id ('deepseek-official', pi-ai ids, ...)
+myprovider: {
+  label: 'My Service',
+  skin: {                                  // the chip wears the provider's identity
+    title: 'My Service',                   // popover badge
+    accent: { ring: '#22c55e', fiveHour: '#3b82f6', weekly: '#22c55e', mcp: '#f59e0b' },
+  },
+  async fetchQuota(getApiKey) {
+    return {
+      level: 'pro' | null,
+      windows: [{ kind, used, limit, remaining, percent, nextResetAt }],
+      mcp: { calls } | null,
+    }
+  },
+}
+```
+
+Switching the default model to a provider without an adapter hides the chip instantly (no network calls); switching back restores it within one poll (≤60 s). Pre-push integration test: `node scripts/test-quota-gate.mjs` (drives the real `apply()` with a mock ctx against the live API — expects `ALL CHECKS PASSED`).
+
+PRs adding adapters for other services (DeepSeek balance, Anthropic usage, OpenAI billing, …) are very welcome — follow the `zai` entry, keep the key in the host, and add a verify check if the service offers a cheap status endpoint.
+
 ## Install (on a new computer)
 
 Requirements: **DeepSeek Harness desktop** installed and started once; **PowerShell 7+** (`pwsh`); a valid **GLM Coding Plan** key.

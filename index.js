@@ -76,7 +76,7 @@ export const PROVIDER_ID = 'zai-mcp'
 const TOOL_NAME = 'web_search_prime'
 
 const PROTOCOL_VERSION = '2025-06-18'
-const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.8.4' }
+const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.0' }
 /** Retried once per search: a streamable-HTTP session the server dropped. */
 const SESSION_LOST_HTTP = new Set([400, 404])
 
@@ -190,26 +190,14 @@ export async function apply(ctx) {
 }
 
 /**
- * Poll the Z.ai monitoring API for the real Coding Plan quota — the credit
- * windows plus the monthly MCP tool usage — and serve it to the Web client on
- * one same-origin route. The key never reaches the browser: only the parsed
- * snapshot leaves the Host. The snapshot also reports whether the Harness's
- * default model provider is "zai", so the client can show the chip only when
- * the subscription is the active provider.
- * @param ctx - plugin context providing webServer and effect scoping.
- * @param getApiKey - current ZAI_API_KEY value (refreshes with the credential).
- * @returns invalidation callback clearing the cache after a key change.
+ * The Z.ai (GLM Coding Plan) quota adapter: the real monitoring API — credit
+ * windows plus the monthly MCP tool usage.
+ * @param getApiKey - returns the current ZAI_API_KEY value.
+ * @returns the adapter snapshot: { level, windows, mcp }.
  */
-function startQuotaService(ctx, getApiKey) {
-  let cached = null
-  let fetchedAt = 0
-  let inflight = null
-
-  /** `yyyy-MM-dd HH:mm:ss` in local time, the format the monitoring API wants. */
-  function apiTimestamp(date) {
-    const pad = (value) => String(value).padStart(2, '0')
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-  }
+async function fetchZaiQuota(getApiKey) {
+  const pad = (value) => String(value).padStart(2, '0')
+  const apiTimestamp = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 
   async function fetchCreditWindows() {
     const response = await fetch(QUOTA_URL, {
@@ -252,55 +240,103 @@ function startQuotaService(ctx, getApiKey) {
     return { calls: total, since: start.getTime(), until: end.getTime() }
   }
 
-  async function fetchQuota() {
-    const [creditResult, toolResult] = await Promise.allSettled([fetchCreditWindows(), fetchMonthlyToolUsage()])
-    if (creditResult.status !== 'fulfilled') throw creditResult.reason
-    const mcp = toolResult.status === 'fulfilled' ? toolResult.value : null
-    return {
-      ok: true,
-      level: creditResult.value.level,
-      windows: creditResult.value.windows,
-      mcp,
-      fetchedAt: Date.now(),
-    }
+  const [creditResult, toolResult] = await Promise.allSettled([fetchCreditWindows(), fetchMonthlyToolUsage()])
+  if (creditResult.status !== 'fulfilled') throw creditResult.reason
+  const mcp = toolResult.status === 'fulfilled' ? toolResult.value : null
+  return { level: creditResult.value.level, windows: creditResult.value.windows, mcp }
+}
+
+/**
+ * Quota adapters keyed by the dsh llm provider id. The chip appears only
+ * while its provider is the active default-model provider; a provider
+ * without an adapter hides the chip entirely (no API calls are made).
+ *
+ * Contribution pattern (skin included): add one entry —
+ *   myprovider: {
+ *     label: 'My Service',
+ *     skin: {
+ *       title: 'My Service',                 // popover badge
+ *       accent: {                            // any CSS color; missing keys fall back
+ *         ring: '#22c55e',                   // composer ring arc
+ *         fiveHour: '#3b82f6',               // first window bar
+ *         weekly: '#22c55e',                 // second window bar
+ *         mcp: '#f59e0b',                    // MCP counter
+ *       },
+ *     },
+ *     async fetchQuota(getApiKey) {
+ *       return { level, windows: [...], mcp }   // same shape as the zai adapter
+ *     },
+ *   }
+ * The provider id is the harness llm provider id (e.g. 'zai',
+ * 'deepseek-official', pi-ai ids). Keys never reach the browser; the host
+ * serves the parsed snapshot and the skin only. See README "Quota adapters".
+ */
+const QUOTA_ADAPTERS = {
+  zai: {
+    label: 'GLM Coding Plan',
+    skin: {
+      title: 'GLM Coding Plan',
+      accent: { ring: '#22c55e', fiveHour: '#3b82f6', weekly: '#22c55e', mcp: '#f59e0b' },
+    },
+    fetchQuota: fetchZaiQuota,
+  },
+}
+
+/**
+ * Serve the active provider's quota snapshot on one same-origin route. The
+ * key never reaches the browser: only the parsed snapshot leaves the Host.
+ * @param ctx - plugin context providing webServer and effect scoping.
+ * @param getApiKey - current ZAI_API_KEY value (refreshes with the credential).
+ * @returns invalidation callback clearing the cache after a key change.
+ */
+function startQuotaService(ctx, getApiKey) {
+  /** provider id -> { value, fetchedAt, inflight } */
+  const cache = new Map()
+
+  /** The active default-model provider id, or null when unreadable. */
+  function activeProvider() {
+    try {
+      const selection = ctx.get('agentDefaultModel')?.currentSelection?.()
+      return typeof selection?.provider === 'string' && selection.provider.length > 0 ? selection.provider : null
+    } catch { return null }
   }
 
-  async function snapshot() {
-    if (cached !== null && Date.now() - fetchedAt < QUOTA_TTL_MS) return withProviderFlag(cached)
-    inflight ??= fetchQuota().then(
-      (value) => {
-        cached = value
-        fetchedAt = Date.now()
-        return withProviderFlag(value)
+  function invalidate() {
+    cache.clear()
+  }
+
+  async function snapshotFor(provider, adapter) {
+    let entry = cache.get(provider)
+    if (entry === undefined) {
+      entry = { value: null, fetchedAt: 0, inflight: null }
+      cache.set(provider, entry)
+    }
+    if (entry.value !== null && Date.now() - entry.fetchedAt < QUOTA_TTL_MS) {
+      return { ...entry.value, provider, supported: true, skin: adapter.skin ?? null }
+    }
+    entry.inflight ??= adapter.fetchQuota(getApiKey).then(
+      (quota) => {
+        entry.value = { ok: true, ...quota, fetchedAt: Date.now() }
+        entry.fetchedAt = Date.now()
+        return { ...entry.value, provider, supported: true, skin: adapter.skin ?? null }
       },
       (error) => {
         const message = String(error instanceof Error ? error.message : error)
-        if (cached !== null) return withProviderFlag({ ...cached, stale: true, error: message })
-        return { ok: false, error: message, fetchedAt: Date.now() }
+        if (entry.value !== null) return { ...entry.value, stale: true, error: message, provider, supported: true, skin: adapter.skin ?? null }
+        return { ok: false, error: message, provider, supported: true, skin: adapter.skin ?? null, fetchedAt: Date.now() }
       },
-    ).finally(() => { inflight = null })
-    return inflight
+    ).finally(() => { entry.inflight = null })
+    return entry.inflight
   }
 
-  /** Whether the Harness's default model provider is the Z.ai subscription. */
-  function withProviderFlag(snapshotValue) {
-    let provider = null
-    let graphDebug
-    try {
-      const selection = ctx.get('agentDefaultModel')?.currentSelection?.()
-      provider = typeof selection?.provider === 'string' && selection.provider.length > 0 ? selection.provider : null
-    } catch { /* the default-model service is optional */ }
-    try {
-      const graph = ctx.get('clientModules')?.graph?.()
-      graphDebug = {
-        hasService: graph !== undefined,
-        entryCount: graph?.entries?.length ?? null,
-        includesThisPackage: graph?.entries?.some((entry) => entry.id === '@local/zai-web-search-mcp' || entry.id === 'dsh-zai-web-search-mcp') === true,
-      }
-    } catch (error) {
-      graphDebug = { error: String(error instanceof Error ? error.message : error) }
+  async function snapshot() {
+    const provider = activeProvider()
+    const adapter = provider !== null ? QUOTA_ADAPTERS[provider] : undefined
+    if (adapter === undefined) {
+      // No adapter for the active provider: the chip hides; nothing is fetched.
+      return { ok: false, supported: false, provider, chip: null, fetchedAt: Date.now() }
     }
-    return { ...snapshotValue, defaultProvider: provider, zaiActive: provider === 'zai', graphDebug }
+    return await snapshotFor(provider, adapter)
   }
 
   const diag = []
@@ -346,10 +382,7 @@ function startQuotaService(ctx, getApiKey) {
     disposeDiagRoute()
   }, 'zai-quota')
 
-  return () => {
-    cached = null
-    fetchedAt = 0
-  }
+  return invalidate
 }
 
 /** A search provider over the Z.ai streamable-HTTP MCP endpoint. */
@@ -740,5 +773,6 @@ function isAbortLike(error, signal) {
 function searchAbortedLike(WebError, signal) {
   return new WebError('Z.ai search aborted', 'WEB_ABORTED', { cause: signal?.aborted === true ? signal.reason : undefined })
 }
+
 
 

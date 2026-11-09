@@ -150,11 +150,21 @@ window.__ModuleLoader__.load({
       return ''
     }
 
+    /** Provider skin from the host adapter: accent colors fall back to the
+     * theme tokens when the adapter omits them. */
+    function accentOf(skin, name, fallback) {
+      const value = skin?.accent?.[name]
+      return typeof value === 'string' && value.length > 0 ? value : fallback
+    }
+
     /** The small context-ring-style trigger: a circular arc of the 5-hour window. */
-    function Ring({ percent, tone }) {
+    function Ring({ percent, tone, skin }) {
       const radius = 6
       const circumference = 2 * Math.PI * radius
       const clamped = Math.max(0, Math.min(100, percent ?? 0))
+      const stroke = tone === 'zaiq-warn' ? 'var(--dsw-alias-state-warn-primary)'
+        : tone === 'zaiq-critical' ? 'var(--dsw-alias-state-error-primary)'
+          : accentOf(skin, 'ring', 'var(--dsw-alias-state-success-primary)')
       return h('svg', {
         className: `zaiq-ring ${tone}`.trim(),
         viewBox: '0 0 16 16',
@@ -166,14 +176,18 @@ window.__ModuleLoader__.load({
       h('circle', {
         cx: 8, cy: 8, r: radius, fill: 'none', className: 'zaiq-ring-arc', strokeWidth: 2.5,
         strokeLinecap: 'round',
+        stroke,
         strokeDasharray: `${(circumference * clamped) / 100} ${circumference}`,
         transform: 'rotate(-90 8 8)',
       }))
     }
 
     /** One quota column in the popover: label, bold "99% Nov 9, 17:55", colored bar of the remaining share. */
-    function WindowColumn({ label, percent, resetAt, barClass }) {
+    function WindowColumn({ label, percent, resetAt, skin, accentKey }) {
       const tone = toneOf(percent)
+      const fill = tone === 'zaiq-warn' ? 'var(--dsw-alias-state-warn-primary)'
+        : tone === 'zaiq-critical' ? 'var(--dsw-alias-state-error-primary)'
+          : accentOf(skin, accentKey, 'var(--dsw-alias-brand-primary)')
       return h('div', { className: 'zaiq-col' },
         h('div', { className: 'zaiq-col-label' }, label),
         h('div', { className: 'zaiq-col-value' },
@@ -181,7 +195,7 @@ window.__ModuleLoader__.load({
           h('span', { className: 'zaiq-col-reset' }, fmtResetAt(resetAt)),
         ),
         h('div', { className: 'zaiq-bar' },
-          h('div', { className: `${barClass} ${tone}`.trim(), style: { width: `${Math.max(2, Math.min(100, percent ?? 0))}%` } })),
+          h('div', { style: { width: `${Math.max(2, Math.min(100, percent ?? 0))}%`, background: fill, height: '100%', borderRadius: '9999px' } })),
       )
     }
 
@@ -205,7 +219,7 @@ window.__ModuleLoader__.load({
           })
           .then((snapshot) => {
             if (alive && snapshot !== null) {
-              diag('quota-data', `ok=${snapshot.ok} zaiActive=${snapshot.zaiActive} windows=${snapshot.windows?.length}`)
+              diag('quota-data', `ok=${snapshot.ok} provider=${snapshot.provider ?? '?'} supported=${snapshot.supported} windows=${snapshot.windows?.length}`)
               setData(snapshot)
             }
           })
@@ -223,14 +237,19 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
-      // Purely derived visibility: no setState during render. Until the first
-      // snapshot arrives the chip renders nothing, and the effect above keeps
-      // running — that is what the previous version broke.
-      const usable = data !== null && data.ok === true
+      // Purely derived visibility: no setState during render. The chip shows
+      // only while the active default-model provider has a quota adapter
+      // (host answers supported:false otherwise — e.g. a non-GLM model).
+      const usable = data !== null && data.ok === true && data.supported !== false
       const fiveHour = usable ? data.windows.find((w) => w.kind === 'fiveHour') : undefined
       if (!usable || fiveHour === undefined) return null
       const weekly = usable ? data.windows.find((w) => w.kind === 'weekly') : undefined
       const mcp = data.mcp ?? null
+      const skin = usable && data.skin ? data.skin : null
+      const badgeTitle = typeof skin?.title === 'string' && skin.title.length > 0
+        ? skin.title
+        : (typeof data.level === 'string' && data.level ? data.level.toUpperCase() : '')
+      const mcpColor = accentOf(skin, 'mcp', 'var(--dsw-alias-state-warn-primary)')
       const percent = remainingPercent(fiveHour) ?? 0
       const tone = toneOf(percent)
       const popoverOpen = open
@@ -253,17 +272,17 @@ window.__ModuleLoader__.load({
         popoverOpen ? h('div', { className: `zaiq-pop${flipLeft ? ' zaiq-pop-left' : ''}`, role: 'dialog', 'aria-label': t('label') },
           h('div', { className: 'zaiq-pop-head' },
             h('span', { className: 'zaiq-pop-title' }, t('title')),
-            h('span', { className: 'zaiq-pop-level' }, typeof data.level === 'string' && data.level ? data.level.toUpperCase() : ''),
+            h('span', { className: 'zaiq-pop-level' }, badgeTitle),
           ),
           h('div', { className: 'zaiq-pop-grid' },
-            h(WindowColumn, { label: t('fiveHour'), percent: remainingPercent(fiveHour), resetAt: fiveHour.nextResetAt, barClass: 'zaiq-bar-fill-blue' }),
+            h(WindowColumn, { label: t('fiveHour'), percent: remainingPercent(fiveHour), resetAt: fiveHour.nextResetAt, skin, accentKey: 'fiveHour' }),
             weekly !== undefined
-              ? h(WindowColumn, { label: t('weekly'), percent: remainingPercent(weekly), resetAt: weekly.nextResetAt, barClass: 'zaiq-bar-fill-green' })
+              ? h(WindowColumn, { label: t('weekly'), percent: remainingPercent(weekly), resetAt: weekly.nextResetAt, skin, accentKey: 'weekly' })
               : null,
             h('div', { className: 'zaiq-col' },
               h('div', { className: 'zaiq-col-label' }, t('mcpMonth')),
               h('div', { className: 'zaiq-col-value' },
-                h('span', { className: 'zaiq-col-percent zaiq-mcp-count' }, mcp !== null ? String(mcp.calls) : '—'),
+                h('span', { className: 'zaiq-col-percent', style: { color: mcpColor } }, mcp !== null ? String(mcp.calls) : '—'),
                 mcp !== null ? h('span', { className: 'zaiq-col-reset' }, ` ${t('calls')}`) : null,
               ),
               h('div', { className: 'zaiq-mcp-note' }, t('mcpNote')),
@@ -282,7 +301,7 @@ window.__ModuleLoader__.load({
           'aria-expanded': popoverOpen,
           title: t('label'),
         },
-        h(Ring, { percent, tone }),
+        h(Ring, { percent, tone, skin }),
         h('span', { className: 'zaiq-trigger-text' }, `${percent}%`),
         )),
       )
@@ -316,10 +335,6 @@ window.__ModuleLoader__.load({
 .zaiq-col-dot{color:var(--dsw-alias-label-secondary)}
 .zaiq-col-reset{font-size:12px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
 .zaiq-bar{height:6px;border-radius:9999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden}
-.zaiq-bar-fill-blue{height:100%;border-radius:9999px;background:var(--dsw-alias-brand-primary)}
-.zaiq-bar-fill-green{height:100%;border-radius:9999px;background:var(--dsw-alias-state-success-primary)}
-.zaiq-bar-fill-blue.zaiq-warn,.zaiq-bar-fill-green.zaiq-warn{background:var(--dsw-alias-state-warn-primary)}
-.zaiq-bar-fill-blue.zaiq-critical,.zaiq-bar-fill-green.zaiq-critical{background:var(--dsw-alias-state-error-primary)}
 .zaiq-mcp-note{font-size:11px;color:var(--dsw-alias-label-secondary);line-height:1.3}
 .zaiq-pop-foot{margin-top:12px;display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:11px;color:var(--dsw-alias-label-secondary)}
 .zaiq-pop-stale{font-size:11px;color:var(--dsw-alias-state-warn-primary)}

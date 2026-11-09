@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Z.ai Web Search (MCP)",
+    "description": "Powers the built-in web_search tool through the Z.ai web_search_prime MCP server, exposes the mcp__zai__web_search_prime tool, and shows the live GLM Coding Plan quota chip near the composer's usage indicators. All surfaces use the stored ZAI_API_KEY credential."
+  }
+}

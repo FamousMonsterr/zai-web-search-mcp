@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Веб-поиск Z.ai (MCP)",
+    "description": "Работает как движок встроенного web_search через MCP-сервер Z.ai, подключает инструмент mcp__zai__web_search_prime и показывает чип с живыми квотами GLM Coding Plan рядом с индикаторами композера. Всё использует сохранённый в Harness ключ ZAI_API_KEY."
+  }
+}

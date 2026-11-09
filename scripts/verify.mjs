@@ -147,9 +147,12 @@ try {
 // --- 5. vision MCP server over stdio ----------------------------------------------
 try {
   const { spawn } = await import('node:child_process')
-  const child = spawn('npx', ['-y', '@z_ai/mcp-server@latest'], {
+  // Windows: npx is npx.cmd, which child_process only resolves through the shell.
+  const isWin = process.platform === 'win32'
+  const child = spawn(isWin ? 'npx.cmd' : 'npx', ['-y', '@z_ai/mcp-server@latest'], {
     env: { ...process.env, Z_AI_API_KEY: key, Z_AI_MODE: 'ZAI' },
     stdio: ['pipe', 'pipe', 'pipe'],
+    ...(isWin ? { shell: true } : {}),
   })
   let stderrTail = ''
   child.stderr.setEncoding('utf8').on('data', (chunk) => { stderrTail = (stderrTail + chunk).slice(-400) })

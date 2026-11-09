@@ -1,6 +1,6 @@
-// Host plugin: web search through the Z.ai "web_search_prime" MCP server
-// (GLM Coding Plan), authenticated by the ZAI_API_KEY credential stored
-// inside the Harness ($DSH_HOME/.credentials.yaml).
+// Host plugin: web search, page reading, and vision through the Z.ai MCP
+// servers (GLM Coding Plan), authenticated by the ZAI_API_KEY credential
+// stored inside the Harness ($DSH_HOME/.credentials.yaml).
 //
 // Surfaces sharing one key reference:
 //   1. A ctx.web search provider (id "zai-mcp") selected as the built-in
@@ -10,6 +10,13 @@
 //   3. A quota service reading the real Z.ai monitoring API (the same data
 //      zcode shows) and serving it to the Web client on /zai-quota: the
 //      5-hour and weekly credit windows plus the monthly MCP tool usage.
+//   4. A ctx.web fetch provider (id "zai-reader") over the "web_reader" MCP
+//      server, selected as the built-in web_fetch backend, plus the same
+//      server's tool mounted as mcp__zai-reader__webReader.
+//   5. The local Z.ai vision MCP server (stdio via npx @z_ai/mcp-server)
+//      bridged as mcp__zai-vision__<name> tools for image and video
+//      understanding; works for text-only models because the server does
+//      the vision server-side and returns text.
 //
 // Config cannot carry the key: dsh-mcp-client takes literal string headers,
 // and Loader !!js config expressions are synchronous, so this plugin resolves
@@ -24,6 +31,22 @@ const MCP_URL = 'https://api.z.ai/api/mcp/web_search_prime/mcp'
 
 /** Local server namespace for the MCP bridge: tools appear as mcp__zai__<rawName>. */
 const SERVER_NAME = 'zai'
+
+/** GLM Coding Plan web-reader MCP endpoint (streamable HTTP). */
+const READER_MCP_URL = 'https://api.z.ai/api/mcp/web_reader/mcp'
+
+/** Namespace for the reader bridge: the tool appears as mcp__zai-reader__webReader. */
+const READER_SERVER_NAME = 'zai-reader'
+
+/** Raw reader tool name on the server. */
+const READER_TOOL_NAME = 'webReader'
+
+/** Reader body cap in characters, mirroring the built-in http provider's default. */
+const READER_MAX_CHARS = 100_000
+
+/** Local vision MCP server: stdio child spawned through npx (needs Node >= 22 on PATH). */
+const VISION_SERVER_NAME = 'zai-vision'
+const VISION_NPX_PACKAGE = '@z_ai/mcp-server@latest'
 
 /** Z.ai monitoring API serving the real Coding Plan quota (same data zcode shows). */
 const QUOTA_URL = 'https://api.z.ai/api/monitor/usage/quota/limit'
@@ -45,7 +68,7 @@ export const PROVIDER_ID = 'zai-mcp'
 const TOOL_NAME = 'web_search_prime'
 
 const PROTOCOL_VERSION = '2025-06-18'
-const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.6.0' }
+const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.7.0' }
 /** Retried once per search: a streamable-HTTP session the server dropped. */
 const SESSION_LOST_HTTP = new Set([400, 404])
 
@@ -97,6 +120,49 @@ export async function apply(ctx) {
     })
   } catch (error) {
     ctx.logger.error(`zai-web-search-mcp: MCP tool bridge failed to start (web_search keeps working): ${String(error)}`)
+  }
+
+  // The web-reader fetch provider (selected as the built-in web_fetch backend
+  // by this bundle's patch: fetchProvider "zai-reader"). Same session shape
+  // as the search provider, over the webReader tool.
+  ctx.web.registerFetchProvider(new ZaiReaderFetch({
+    endpoint: READER_MCP_URL,
+    toolName: READER_TOOL_NAME,
+    getApiKey: () => apiKey,
+    WebError,
+  }))
+
+  // Reader MCP tool bridge: mcp__zai-reader__webReader. Non-fatal like the
+  // search bridge; the fetch provider above keeps working either way.
+  try {
+    await mcpClient.apply(ctx, {
+      serverName: READER_SERVER_NAME,
+      transport: 'streamable-http',
+      url: READER_MCP_URL,
+      headers: { Authorization: `Bearer ${apiKey}` },
+      failOnStartupError: false,
+    })
+  } catch (error) {
+    ctx.logger.error(`zai-web-search-mcp: reader MCP tool bridge failed to start (web_fetch keeps working): ${String(error)}`)
+  }
+
+  // Vision MCP tool bridge: mcp__zai-vision__<name>. A stdio child through
+  // npx, so it needs Node >= 22 and npx on the host PATH; a cold npx cache
+  // can exceed the SDK's negotiation timeout, in which case the bridge fails
+  // non-fatal and reconnects (prewarm once: Z_AI_API_KEY=... npx -y
+  // @z_ai/mcp-server@latest). The child snapshots the key at spawn time, so
+  // a rotated key reaches it after the plugin reloads.
+  try {
+    await mcpClient.apply(ctx, {
+      serverName: VISION_SERVER_NAME,
+      transport: 'stdio',
+      command: 'npx',
+      args: ['-y', VISION_NPX_PACKAGE],
+      env: { Z_AI_API_KEY: apiKey, Z_AI_MODE: 'ZAI' },
+      failOnStartupError: false,
+    })
+  } catch (error) {
+    ctx.logger.error(`zai-web-search-mcp: vision MCP bridge failed to start (search, reader and quota keep working): ${String(error)}`)
   }
 }
 
@@ -417,11 +483,161 @@ class ZaiMcpSearch {
   }
 }
 
+/**
+ * A fetch provider over the Z.ai web-reader MCP endpoint: calls the
+ * webReader tool and maps its {title, url, content, ...} payload onto the
+ * seam's WebFetchResult as a text body (the tool's markdown content). When
+ * the patch selects it (fetchProvider "zai-reader"), the built-in web_fetch
+ * tool reads through Z.ai server-side — anti-scraping bypass and structured
+ * extraction — instead of the anonymous local HTTP provider.
+ */
+class ZaiReaderFetch {
+  constructor({ endpoint, toolName, getApiKey, WebError }) {
+    this.endpoint = endpoint
+    this.toolName = toolName
+    this.getApiKey = getApiKey
+    this.WebError = WebError
+    this.sessionId = undefined
+    this.lastRpcId = 0
+  }
+
+  id = READER_PROVIDER_ID
+
+  available() {
+    return this.getApiKey().length > 0
+  }
+
+  async fetch(request, signal) {
+    try {
+      return await this.withLiveSession(signal, async () => await this.callTool(request.url, signal))
+    } catch (error) {
+      if (error instanceof this.WebError) throw error
+      if (isAbortLike(error, signal)) {
+        throw new this.WebError('Z.ai reader aborted', 'WEB_ABORTED', { cause: signal?.aborted === true ? signal.reason : error })
+      }
+      throw new this.WebError(describeReaderFailure(error, this.endpoint), 'WEB_PROVIDER_ERROR', { cause: error })
+    }
+  }
+
+  /** Run one operation against a live MCP session, re-initializing once when the server dropped it. */
+  async withLiveSession(signal, operation) {
+    for (let attempt = 0; ; attempt++) {
+      if (this.sessionId === undefined) await this.initialize(signal)
+      try {
+        return await operation()
+      } catch (error) {
+        if (attempt === 0 && error instanceof McpSessionLost) {
+          this.sessionId = undefined
+          continue
+        }
+        throw error
+      }
+    }
+  }
+
+  async initialize(signal) {
+    await this.post({
+      body: {
+        jsonrpc: '2.0',
+        id: this.nextRpcId(),
+        method: 'initialize',
+        params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: CLIENT_INFO },
+      },
+      signal,
+    })
+    await this.post({
+      body: { jsonrpc: '2.0', method: 'notifications/initialized' },
+      signal,
+    })
+  }
+
+  async callTool(url, signal) {
+    const message = await this.post({
+      body: {
+        jsonrpc: '2.0',
+        id: this.nextRpcId(),
+        method: 'tools/call',
+        params: { name: this.toolName, arguments: { url } },
+      },
+      signal,
+    })
+    if (message.error !== undefined) {
+      if (/-32\d\d\d|session/i.test(String(message.error.message ?? message.error.code))) throw new McpSessionLost(message.error.message)
+      throw new McpEndpointError(`MCP tools/call failed: ${JSON.stringify(message.error)}`)
+    }
+    const result = message.result
+    const block = (result?.content ?? []).find((b) => b.type === 'text' && typeof b.text === 'string')
+    if (result?.isError === true || block === undefined) {
+      const detail = block !== undefined ? `: ${block.text.slice(0, 300)}` : ''
+      throw new McpEndpointError(`Z.ai reader tool returned an error result${detail}`)
+    }
+    const payload = parseJsonObjectPayload(block.text)
+    const content = typeof payload?.content === 'string' ? payload.content : ''
+    if (content.length === 0) throw new McpEndpointError('Z.ai reader tool returned no page content')
+    const truncated = content.length > READER_MAX_CHARS
+    return {
+      url: typeof payload?.url === 'string' && payload.url.length > 0 ? payload.url : url,
+      statusCode: 200,
+      body: { kind: 'text', content: truncated ? content.slice(0, READER_MAX_CHARS) : content },
+      truncated,
+    }
+  }
+
+  /** One MCP POST: JSON or SSE body, session header capture, typed transport errors. */
+  async post({ body, signal }) {
+    const headers = {
+      authorization: `Bearer ${this.getApiKey()}`,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    }
+    if (this.sessionId !== undefined) headers['mcp-session-id'] = this.sessionId
+    let response
+    try {
+      response = await fetch(this.endpoint, {
+        method: 'POST',
+        redirect: 'error',
+        headers,
+        body: JSON.stringify(body),
+        ...(signal !== undefined ? { signal } : {}),
+      })
+    } catch (error) {
+      throw new McpTransportError(error)
+    }
+    const session = response.headers.get('mcp-session-id')
+    if (session !== null && session.length > 0) this.sessionId = session
+    if (!response.ok) {
+      let detail = ''
+      try {
+        detail = (await response.text()).replace(/\s+/g, ' ').slice(0, 200)
+      } catch { /* an unreadable error body adds nothing */ }
+      if (SESSION_LOST_HTTP.has(response.status)) throw new McpSessionLost(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`)
+      throw new McpHttpError(response.status, `Z.ai MCP endpoint returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`)
+    }
+    const text = await response.text()
+    return parseJsonRpcMessage(text)
+  }
+
+  nextRpcId() {
+    this.lastRpcId += 1
+    return this.lastRpcId
+  }
+}
+
 /** The tool's text payload is JSON, sometimes double-encoded; normalize to an array. */
 function parseTextPayload(text) {
   let value = JSON.parse(text)
   if (typeof value === 'string') value = JSON.parse(value)
   if (!Array.isArray(value)) throw new McpEndpointError('Z.ai search tool returned an unexpected payload shape')
+  return value
+}
+
+/** A tool's text payload that is one JSON object, sometimes double-encoded. */
+function parseJsonObjectPayload(text) {
+  let value = JSON.parse(text)
+  if (typeof value === 'string') value = JSON.parse(value)
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new McpEndpointError('Z.ai reader tool returned an unexpected payload shape')
+  }
   return value
 }
 
@@ -465,6 +681,18 @@ class McpTransportError extends Error {
     super(String(cause), { cause })
     this.name = 'McpTransportError'
   }
+}
+
+/** Id this plugin's fetch provider registers under on ctx.web. */
+export const READER_PROVIDER_ID = 'zai-reader'
+
+/** Render one reader failure with recovery guidance for the model and user. */
+function describeReaderFailure(error, endpoint) {
+  if (error instanceof McpHttpError && (error.status === 401 || error.status === 403)) {
+    return `Z.ai rejected the ${API_KEY_REF} credential (HTTP ${error.status}); guide the user to check the stored key, then retry`
+  }
+  const detail = error instanceof Error ? error.message : String(error)
+  return `Z.ai web reader failed: ${detail}\n\nThe read used the MCP endpoint ${JSON.stringify(endpoint)} with the ${API_KEY_REF} Harness credential; the built-in anonymous "http" fetch provider stays registered and can be re-selected with fetchProvider "http" in this bundle's patch.`
 }
 
 /** Render one provider failure with recovery guidance for the model and user. */

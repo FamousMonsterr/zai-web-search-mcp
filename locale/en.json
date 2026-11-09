@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Z.ai Web Search (MCP)",
-    "description": "Powers the built-in web_search tool through the Z.ai web_search_prime MCP server, exposes the mcp__zai__web_search_prime tool, and shows the live GLM Coding Plan quota chip near the composer's usage indicators. All surfaces use the stored ZAI_API_KEY credential."
+    "title": "Z.ai Web Tools (MCP)",
+    "description": "Powers the built-in web_search and web_fetch tools through the Z.ai web_search_prime and web_reader MCP servers, exposes mcp__zai__web_search_prime, mcp__zai-reader__webReader and the mcp__zai-vision__* image/video tools, and shows the live GLM Coding Plan quota chip near the composer's usage indicators. All surfaces use the stored ZAI_API_KEY credential."
   }
 }

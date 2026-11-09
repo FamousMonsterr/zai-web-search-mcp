@@ -1,11 +1,13 @@
-# Mounts the local Host plugin that powers web search through the Z.ai
-# web_search_prime MCP server, and selects its provider ("zai-mcp") as the
-# built-in web_search backend in place of the DeepSeek search API. The plugin
+# Mounts the local Host plugin that powers web search and page reading
+# through the Z.ai MCP servers (web_search_prime + web_reader), mounts the
+# vision MCP bridge, and selects the plugin's providers ("zai-mcp" search,
+# "zai-reader" fetch) as the built-in web_search / web_fetch backends in
+# place of the DeepSeek search API and the anonymous HTTP fetcher. The plugin
 # resolves the ZAI_API_KEY credential stored in the Harness
 # ($DSH_HOME/.credentials.yaml), so no secret appears here.
 #
-# The `web` row override restates the fetch provider from dsh-base unchanged:
-# a patch replaces the whole config mapping.
+# The `web` row override replaces the whole config mapping. To fall back:
+# set searchProvider to "deepseek" style backends or fetchProvider to "http".
 - insert:
     - id: zai-web-search-mcp
       name: '@local/zai-web-search-mcp'
@@ -14,7 +16,7 @@
   name: '@deepseek-ai/dsh-web'
   config:
     searchProvider: zai-mcp
-    fetchProvider: http
+    fetchProvider: zai-reader
 # Session reading gate: the base mounts ctx.sessionQuery dormant
 # (openAt: never -> SESSION_QUERY_SEARCH_DISABLED). Lift it permanently:
 # open the SQLite index at startup over a durable file next to the

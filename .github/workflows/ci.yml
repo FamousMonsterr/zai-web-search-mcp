@@ -22,6 +22,7 @@ jobs:
           node --check client.js
           node --check scripts/install.mjs
           node --check scripts/verify.mjs
+          node --check scripts/prepare-npm.mjs
 
       - name: JSON files parse
         run: |

@@ -1,6 +1,12 @@
 // Live verification of every Z.ai integration this plugin uses.
 // Reads ZAI_API_KEY from $DSH_HOME/.credentials.yaml and never prints it.
 //   node.exe scripts/verify.mjs            (dsh runtime node, or any Node >= 18)
+// Checks:
+//   1. MCP web_search_prime (initialize / tools/list / tools/call)
+//   2. Quota credit windows API
+//   3. Monthly MCP tool usage API
+//   4. MCP web_reader (initialize / tools/list / tools/call webReader)
+//   5. Vision MCP server over stdio (npx @z_ai/mcp-server; needs npx + Node >= 22)
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -21,8 +27,8 @@ const key = m[1]
 console.log('key: loaded from credentials (length ' + key.length + '), value not printed')
 console.log('')
 
-const MCP = 'https://api.z.ai/api/mcp/web_search_prime/mcp'
-let session = null
+const SEARCH_MCP = 'https://api.z.ai/api/mcp/web_search_prime/mcp'
+const READER_MCP = 'https://api.z.ai/api/mcp/web_reader/mcp'
 let rpcId = 0
 let failures = 0
 
@@ -44,35 +50,50 @@ function parseJsonRpcMessage(text) {
   return message
 }
 
-async function post(body) {
-  const headers = {
-    authorization: 'Bearer ' + key,
-    'content-type': 'application/json',
-    accept: 'application/json, text/event-stream',
+// Streamable-HTTP MCP client with one session per endpoint.
+function makeClient(endpoint) {
+  const state = { session: null }
+  async function post(body) {
+    const headers = {
+      authorization: 'Bearer ' + key,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    }
+    if (state.session) headers['mcp-session-id'] = state.session
+    const r = await fetch(endpoint, { method: 'POST', redirect: 'error', headers, body: JSON.stringify(body) })
+    const s = r.headers.get('mcp-session-id')
+    if (s) state.session = s
+    if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + (await r.text()).slice(0, 160))
+    return parseJsonRpcMessage(await r.text())
   }
-  if (session) headers['mcp-session-id'] = session
-  const r = await fetch(MCP, { method: 'POST', redirect: 'error', headers, body: JSON.stringify(body) })
-  const s = r.headers.get('mcp-session-id')
-  if (s) session = s
-  if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + (await r.text()).slice(0, 160))
-  return parseJsonRpcMessage(await r.text())
+  async function connect() {
+    await post({ jsonrpc: '2.0', id: ++rpcId, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'verify', version: '1.0' } } })
+    await post({ jsonrpc: '2.0', method: 'notifications/initialized' })
+  }
+  return { connect, post }
+}
+
+// A tool text block that is JSON, sometimes double-encoded; normalize once.
+function parseTextPayload(text) {
+  let v = JSON.parse(text)
+  if (typeof v === 'string') v = JSON.parse(v)
+  return v
 }
 
 // --- 1. MCP web_search_prime ---------------------------------------------------
 try {
-  const init = await post({ jsonrpc: '2.0', id: ++rpcId, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'verify', version: '1.0' } } })
-  await post({ jsonrpc: '2.0', method: 'notifications/initialized' })
-  const tools = await post({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/list' })
+  const c = makeClient(SEARCH_MCP)
+  await c.connect()
+  const tools = await c.post({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/list' })
   const names = (tools.result?.tools ?? []).map((t) => t.name)
   if (!names.includes('web_search_prime')) throw new Error('web_search_prime not offered; tools=' + JSON.stringify(names))
-  const call = await post({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/call', params: { name: 'web_search_prime', arguments: { search_query: 'z.ai glm-4.6' } } })
+  const call = await c.post({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/call', params: { name: 'web_search_prime', arguments: { search_query: 'z.ai glm-4.6' } } })
   const block = (call.result?.content ?? []).find((b) => b.type === 'text')
-  let v = JSON.parse(block.text)
-  if (typeof v === 'string') v = JSON.parse(v)
-  console.log('[OK] 1/3 MCP server ' + (init.result?.serverInfo?.name ?? '?') + ': tools=' + JSON.stringify(names) + ', search returned ' + (Array.isArray(v) ? v.length : '?') + ' items')
+  const v = parseTextPayload(block.text)
+  console.log('[OK] 1/5 MCP search server: tools=' + JSON.stringify(names) + ', search returned ' + (Array.isArray(v) ? v.length : '?') + ' items')
 } catch (e) {
   failures++
-  console.log('[FAIL] 1/3 MCP web_search_prime: ' + e.message)
+  console.log('[FAIL] 1/5 MCP web_search_prime: ' + e.message)
 }
 
 // --- 2. quota credit windows -----------------------------------------------------
@@ -81,10 +102,10 @@ try {
   const p = await r.json()
   if (p.success !== true) throw new Error('success!=true')
   const parts = (p.data?.limits ?? []).map((l) => 'unit' + l.unit + 'n' + l.number + ' ' + l.currentValue + '/' + l.usage + ' (' + l.percentage + '%)')
-  console.log('[OK] 2/3 quota API: level=' + (p.data?.level ?? '?') + ' | ' + parts.join(' | '))
+  console.log('[OK] 2/5 quota API: level=' + (p.data?.level ?? '?') + ' | ' + parts.join(' | '))
 } catch (e) {
   failures++
-  console.log('[FAIL] 2/3 quota API: ' + e.message)
+  console.log('[FAIL] 2/5 quota API: ' + e.message)
 }
 
 // --- 3. monthly MCP tool usage ----------------------------------------------------
@@ -98,10 +119,86 @@ try {
   const p = await r.json()
   const total = p?.data?.totalUsage?.totalSearchMcpCount
   if (p.success !== true || typeof total !== 'number') throw new Error('unexpected payload')
-  console.log('[OK] 3/3 tool-usage API: ' + total + ' MCP calls in the last 30 days')
+  console.log('[OK] 3/5 tool-usage API: ' + total + ' MCP calls in the last 30 days')
 } catch (e) {
   failures++
-  console.log('[FAIL] 3/3 tool-usage API: ' + e.message)
+  console.log('[FAIL] 3/5 tool-usage API: ' + e.message)
+}
+
+// --- 4. MCP web_reader ------------------------------------------------------------
+try {
+  const c = makeClient(READER_MCP)
+  await c.connect()
+  const tools = await c.post({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/list' })
+  const names = (tools.result?.tools ?? []).map((t) => t.name)
+  if (!names.includes('webReader')) throw new Error('webReader not offered; tools=' + JSON.stringify(names))
+  const call = await c.post({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/call', params: { name: 'webReader', arguments: { url: 'https://example.com' } } })
+  const block = (call.result?.content ?? []).find((b) => b.type === 'text')
+  const v = parseTextPayload(block.text)
+  if (typeof v?.content !== 'string' || v.content.length === 0) throw new Error('no content in reader payload: ' + JSON.stringify(Object.keys(v ?? {})))
+  console.log('[OK] 4/5 MCP reader server: tools=' + JSON.stringify(names) + ', read "https://example.com" title=' + JSON.stringify(v.title) + ' content=' + v.content.length + ' chars')
+} catch (e) {
+  failures++
+  console.log('[FAIL] 4/5 MCP web_reader: ' + e.message)
+}
+
+// --- 5. vision MCP server over stdio ----------------------------------------------
+try {
+  const { spawn } = await import('node:child_process')
+  const child = spawn('npx', ['-y', '@z_ai/mcp-server@latest'], {
+    env: { ...process.env, Z_AI_API_KEY: key, Z_AI_MODE: 'ZAI' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  let stderrTail = ''
+  child.stderr.setEncoding('utf8').on('data', (chunk) => { stderrTail = (stderrTail + chunk).slice(-400) })
+  const pending = new Map()
+  let nextId = 0
+  let buffer = ''
+  child.stdout.setEncoding('utf8').on('data', (chunk) => {
+    buffer += chunk
+    let index
+    while ((index = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, index).trim()
+      buffer = buffer.slice(index + 1)
+      if (line.length === 0) continue
+      try {
+        const message = JSON.parse(line)
+        if (message.id !== undefined && pending.has(message.id)) {
+          pending.get(message.id)(message)
+          pending.delete(message.id)
+        }
+      } catch { /* skip non-JSON noise */ }
+    }
+  })
+  function request(method, params) {
+    return new Promise((resolve, reject) => {
+      const id = ++nextId
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(method + ' timed out')) }, 60000)
+      pending.set(id, (message) => { clearTimeout(timer); resolve(message) })
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params: params ?? {} }) + '\n')
+    })
+  }
+  try {
+    const init = await Promise.race([
+      (async () => {
+        const r = await request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'verify', version: '1.0' } })
+        child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
+        return r
+      })(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('spawn/negotiation timed out (cold npx cache? prewarm once: npx -y @z_ai/mcp-server@latest)')), 120000)),
+    ])
+    if (init.error) throw new Error('initialize failed: ' + JSON.stringify(init.error))
+    const tools = await request('tools/list')
+    const names = (tools.result?.tools ?? []).map((t) => t.name)
+    if (!names.includes('analyze_image')) throw new Error('analyze_image not offered; tools=' + JSON.stringify(names))
+    console.log('[OK] 5/5 vision MCP (stdio): server=' + JSON.stringify(init.result?.serverInfo ?? {}) + ', tools=' + JSON.stringify(names))
+  } finally {
+    for (const [id, resolve] of pending) { resolve({ error: { message: 'cancelled' } }); pending.delete(id) }
+    child.kill()
+  }
+} catch (e) {
+  failures++
+  console.log('[FAIL] 5/5 vision MCP (stdio): ' + e.message + (stderrTail ? ' | stderr: ' + stderrTail.replace(/\s+/g, ' ').trim().slice(-200) : ''))
 }
 
 console.log('')

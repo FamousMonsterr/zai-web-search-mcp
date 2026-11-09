@@ -7,17 +7,25 @@ It is written in simple English on purpose so that even a small model can follow
 
 This repository contains one plugin: **`@local/zai-web-search-mcp`**.
 
-The plugin adds three things to the **DeepSeek Harness (dsh) desktop app**
+The plugin adds five things to the **DeepSeek Harness (dsh) desktop app**
 (an Electron app, also called "DeepSeek Harness"):
 
 1. **Web search.** The built-in `web_search` tool starts working through the
    Z.ai MCP server `web_search_prime`. Z.ai is the company behind the
    GLM Coding Plan subscription.
-2. **An MCP tool.** The same Z.ai server is mounted as the tool
+2. **A search MCP tool.** The same Z.ai server is mounted as the tool
    `mcp__zai__web_search_prime`.
 3. **A quota chip.** A small indicator near the message composer shows the
    GLM Coding Plan quota: the 5-hour window, the weekly window, and the
    number of MCP tool calls in the last 30 days.
+4. **Web reading.** The built-in `web_fetch` tool reads through the Z.ai
+   `web_reader` MCP server (the plugin registers a `zai-reader` fetch
+   provider), and the same server is mounted as `mcp__zai-reader__webReader`.
+5. **Vision tools.** The local Z.ai vision MCP server (started with
+   `npx -y @z_ai/mcp-server@latest`, stdio, needs Node >= 22 and `npx` on
+   the host PATH) is mounted as `mcp__zai-vision__<name>` tools. Text-only
+   models can use them: pass a file path, the server does the vision
+   server-side and returns text.
 
 Important: the plugin talks to the **international** Z.ai endpoint
 `https://api.z.ai`. This endpoint is for users **outside mainland China**.
@@ -55,13 +63,14 @@ run it too.
 
 ```
 index.js             HOST side. Runs in the dsh host process.
-                     Registers the web-search provider, mounts the MCP
-                     tool bridge, serves /zai-quota and /zai-quota-diag.
+                     Registers the web-search and web-reader providers,
+                     mounts the search/reader/vision MCP tool bridges,
+                     serves /zai-quota and /zai-quota-diag.
 client.js            CLIENT side. Runs in the app UI (browser/Electron
                      renderer). Renders the quota chip (React).
 cordis.patch.yml     dsh bundle patch. Mounts the plugin, selects the
-                     search provider "zai-mcp", configures SQLite session
-                     index.
+                     providers "zai-mcp" (search) and "zai-reader" (fetch),
+                     configures SQLite session index.
 locale/en.json       English UI strings for the chip.
 locale/ru.json       Russian UI strings for the chip.
 icon.svg             Plugin icon.

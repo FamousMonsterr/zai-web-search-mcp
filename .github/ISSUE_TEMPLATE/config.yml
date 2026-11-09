@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & discussions
+    url: https://github.com/FamousMonsterr/zai-web-search-mcp/discussions
+    about: Ask anything about installing or using the plugin.
+  - name: Security issues
+    url: https://github.com/FamousMonsterr/zai-web-search-mcp/security
+    about: Report vulnerabilities privately — do not open a public issue.

@@ -6,7 +6,8 @@
 // and reset times, plus the monthly MCP tool call count. Data comes from the
 // Host's /zai-quota route, which reads the real monitoring API with the
 // stored ZAI_API_KEY; the key itself never reaches the browser. The chip
-// only shows while the Harness's default model provider is "zai".
+// shows whenever the quota API is reachable; the snapshot's zaiActive flag
+// (default model provider === "zai") stays available for diagnostics.
 window.__ModuleLoader__.load({
   id: '@local/zai-web-search-mcp',
   factory(require) {
@@ -123,7 +124,7 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
-      const usable = data !== null && data.ok === true && data.zaiActive !== false
+      const usable = data !== null && data.ok === true
       const fiveHour = usable ? data.windows.find((w) => w.kind === 'fiveHour') : undefined
       if (!usable || fiveHour === undefined) {
         setOpen(false)

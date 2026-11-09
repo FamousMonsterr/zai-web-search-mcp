@@ -7,7 +7,7 @@ It is written in simple English on purpose so that even a small model can follow
 
 This repository contains one plugin: **`@local/zai-web-search-mcp`**.
 
-The plugin adds five things to the **DeepSeek Harness (dsh) desktop app**
+The plugin adds six things to the **DeepSeek Harness (dsh) desktop app**
 (an Electron app, also called "DeepSeek Harness"):
 
 1. **Web search.** The built-in `web_search` tool starts working through the
@@ -26,6 +26,12 @@ The plugin adds five things to the **DeepSeek Harness (dsh) desktop app**
    the host PATH) is mounted as `mcp__zai-vision__<name>` tools. Text-only
    models can use them: pass a file path, the server does the vision
    server-side and returns text.
+6. **Zread tools.** The Zread MCP server (GitHub repository analysis) is
+   mounted as `mcp__zai-zread__search_doc`, `mcp__zai-zread__read_file` and
+   `mcp__zai-zread__get_repo_structure` over public GitHub repositories.
+
+The quota chip speaks the Harness UI language: English, Russian and Chinese
+strings are registered in `client.js` (`ctx.locale.register`).
 
 Important: the plugin talks to the **international** Z.ai endpoint
 `https://api.z.ai`. This endpoint is for users **outside mainland China**.
@@ -64,8 +70,8 @@ run it too.
 ```
 index.js             HOST side. Runs in the dsh host process.
                      Registers the web-search and web-reader providers,
-                     mounts the search/reader/vision MCP tool bridges,
-                     serves /zai-quota and /zai-quota-diag.
+                     mounts the search/reader/vision/zread MCP tool
+                     bridges, serves /zai-quota and /zai-quota-diag.
 client.js            CLIENT side. Runs in the app UI (browser/Electron
                      renderer). Renders the quota chip (React).
 cordis.patch.yml     dsh bundle patch. Mounts the plugin, selects the
@@ -73,6 +79,7 @@ cordis.patch.yml     dsh bundle patch. Mounts the plugin, selects the
                      configures SQLite session index.
 locale/en.json       English UI strings for the chip.
 locale/ru.json       Russian UI strings for the chip.
+locale/zh.json       Chinese UI strings for the chip.
 icon.svg             Plugin icon.
 package.json         Package manifest. Declares the dsh client module
                      (platform: "web") and the bundle patch.
@@ -80,7 +87,7 @@ install.ps1          Installer entry for humans (calls scripts/install.mjs).
 verify.ps1           Verifier entry for humans (calls scripts/verify.mjs).
 scripts/install.mjs  Installer logic. Wires ~/.dsh/profiles/desktop/
                      package.json, checks the credential, runs pnpm.
-scripts/verify.mjs   Live check of all three Z.ai integrations.
+scripts/verify.mjs   Live check of all six Z.ai integrations.
 README.md            Human documentation (Russian).
 AGENTS.md            This file. You are reading it.
 ```

@@ -20,7 +20,7 @@ fs.mkdirSync(path.join(out, 'locale'), { recursive: true })
 for (const f of ['index.js', 'client.js', 'icon.svg', 'README.md', 'LICENSE']) {
   fs.copyFileSync(path.join(root, f), path.join(out, f))
 }
-for (const f of ['en.json', 'ru.json']) {
+for (const f of ['en.json', 'ru.json', 'zh.json']) {
   fs.copyFileSync(path.join(root, 'locale', f), path.join(out, 'locale', f))
 }
 

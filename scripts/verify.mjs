@@ -7,6 +7,7 @@
 //   3. Monthly MCP tool usage API
 //   4. MCP web_reader (initialize / tools/list / tools/call webReader)
 //   5. Vision MCP server over stdio (npx @z_ai/mcp-server; needs npx + Node >= 22)
+//   6. MCP zread (initialize / tools/list for search_doc / read_file / get_repo_structure)
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -29,6 +30,7 @@ console.log('')
 
 const SEARCH_MCP = 'https://api.z.ai/api/mcp/web_search_prime/mcp'
 const READER_MCP = 'https://api.z.ai/api/mcp/web_reader/mcp'
+const ZREAD_MCP = 'https://api.z.ai/api/mcp/zread/mcp'
 let rpcId = 0
 let failures = 0
 
@@ -90,10 +92,10 @@ try {
   const call = await c.post({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/call', params: { name: 'web_search_prime', arguments: { search_query: 'z.ai glm-4.6' } } })
   const block = (call.result?.content ?? []).find((b) => b.type === 'text')
   const v = parseTextPayload(block.text)
-  console.log('[OK] 1/5 MCP search server: tools=' + JSON.stringify(names) + ', search returned ' + (Array.isArray(v) ? v.length : '?') + ' items')
+  console.log('[OK] 1/6 MCP search server: tools=' + JSON.stringify(names) + ', search returned ' + (Array.isArray(v) ? v.length : '?') + ' items')
 } catch (e) {
   failures++
-  console.log('[FAIL] 1/5 MCP web_search_prime: ' + e.message)
+  console.log('[FAIL] 1/6 MCP web_search_prime: ' + e.message)
 }
 
 // --- 2. quota credit windows -----------------------------------------------------
@@ -102,10 +104,10 @@ try {
   const p = await r.json()
   if (p.success !== true) throw new Error('success!=true')
   const parts = (p.data?.limits ?? []).map((l) => 'unit' + l.unit + 'n' + l.number + ' ' + l.currentValue + '/' + l.usage + ' (' + l.percentage + '%)')
-  console.log('[OK] 2/5 quota API: level=' + (p.data?.level ?? '?') + ' | ' + parts.join(' | '))
+  console.log('[OK] 2/6 quota API: level=' + (p.data?.level ?? '?') + ' | ' + parts.join(' | '))
 } catch (e) {
   failures++
-  console.log('[FAIL] 2/5 quota API: ' + e.message)
+  console.log('[FAIL] 2/6 quota API: ' + e.message)
 }
 
 // --- 3. monthly MCP tool usage ----------------------------------------------------
@@ -119,10 +121,10 @@ try {
   const p = await r.json()
   const total = p?.data?.totalUsage?.totalSearchMcpCount
   if (p.success !== true || typeof total !== 'number') throw new Error('unexpected payload')
-  console.log('[OK] 3/5 tool-usage API: ' + total + ' MCP calls in the last 30 days')
+  console.log('[OK] 3/6 tool-usage API: ' + total + ' MCP calls in the last 30 days')
 } catch (e) {
   failures++
-  console.log('[FAIL] 3/5 tool-usage API: ' + e.message)
+  console.log('[FAIL] 3/6 tool-usage API: ' + e.message)
 }
 
 // --- 4. MCP web_reader ------------------------------------------------------------
@@ -136,10 +138,10 @@ try {
   const block = (call.result?.content ?? []).find((b) => b.type === 'text')
   const v = parseTextPayload(block.text)
   if (typeof v?.content !== 'string' || v.content.length === 0) throw new Error('no content in reader payload: ' + JSON.stringify(Object.keys(v ?? {})))
-  console.log('[OK] 4/5 MCP reader server: tools=' + JSON.stringify(names) + ', read "https://example.com" title=' + JSON.stringify(v.title) + ' content=' + v.content.length + ' chars')
+  console.log('[OK] 4/6 MCP reader server: tools=' + JSON.stringify(names) + ', read "https://example.com" title=' + JSON.stringify(v.title) + ' content=' + v.content.length + ' chars')
 } catch (e) {
   failures++
-  console.log('[FAIL] 4/5 MCP web_reader: ' + e.message)
+  console.log('[FAIL] 4/6 MCP web_reader: ' + e.message)
 }
 
 // --- 5. vision MCP server over stdio ----------------------------------------------
@@ -191,14 +193,29 @@ try {
     const tools = await request('tools/list')
     const names = (tools.result?.tools ?? []).map((t) => t.name)
     if (!names.includes('analyze_image')) throw new Error('analyze_image not offered; tools=' + JSON.stringify(names))
-    console.log('[OK] 5/5 vision MCP (stdio): server=' + JSON.stringify(init.result?.serverInfo ?? {}) + ', tools=' + JSON.stringify(names))
+    console.log('[OK] 5/6 vision MCP (stdio): server=' + JSON.stringify(init.result?.serverInfo ?? {}) + ', tools=' + JSON.stringify(names))
   } finally {
     for (const [id, resolve] of pending) { resolve({ error: { message: 'cancelled' } }); pending.delete(id) }
     child.kill()
   }
 } catch (e) {
   failures++
-  console.log('[FAIL] 5/5 vision MCP (stdio): ' + e.message + (stderrTail ? ' | stderr: ' + stderrTail.replace(/\s+/g, ' ').trim().slice(-200) : ''))
+  console.log('[FAIL] 5/6 vision MCP (stdio): ' + e.message + (stderrTail ? ' | stderr: ' + stderrTail.replace(/\s+/g, ' ').trim().slice(-200) : ''))
+}
+
+// --- 6. MCP zread -----------------------------------------------------------------
+try {
+  const c = makeClient(ZREAD_MCP)
+  await c.connect()
+  const tools = await c.post({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/list' })
+  const names = (tools.result?.tools ?? []).map((t) => t.name)
+  const expected = ['search_doc', 'read_file', 'get_repo_structure']
+  const missing = expected.filter((n) => !names.includes(n))
+  if (missing.length > 0) throw new Error('missing tools ' + JSON.stringify(missing) + '; got ' + JSON.stringify(names))
+  console.log('[OK] 6/6 MCP zread server: tools=' + JSON.stringify(names))
+} catch (e) {
+  failures++
+  console.log('[FAIL] 6/6 MCP zread: ' + e.message)
 }
 
 console.log('')

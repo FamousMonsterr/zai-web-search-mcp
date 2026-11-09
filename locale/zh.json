@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Z.ai 网页工具 (MCP)",
+    "description": "通过 Z.ai 的 web_search_prime 和 web_reader MCP 服务器驱动内置的 web_search 与 web_fetch 工具，提供 mcp__zai__web_search_prime、mcp__zai-reader__webReader、mcp__zai-vision__*（图像/视频）以及 mcp__zai-zread__*（GitHub 仓库分析）工具，并在输入框附近显示 GLM Coding Plan 实时用量角标。所有功能均使用已保存的 ZAI_API_KEY 凭据。"
+  }
+}

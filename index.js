@@ -17,6 +17,8 @@
 //      bridged as mcp__zai-vision__<name> tools for image and video
 //      understanding; works for text-only models because the server does
 //      the vision server-side and returns text.
+//   6. The Zread MCP server (GitHub repository docs search, structure and
+//      file reading) bridged as mcp__zai-zread__<name> tools.
 //
 // Config cannot carry the key: dsh-mcp-client takes literal string headers,
 // and Loader !!js config expressions are synchronous, so this plugin resolves
@@ -48,6 +50,12 @@ const READER_MAX_CHARS = 100_000
 const VISION_SERVER_NAME = 'zai-vision'
 const VISION_NPX_PACKAGE = '@z_ai/mcp-server@latest'
 
+/** Zread MCP endpoint (GitHub repository docs, structure and file reading). */
+const ZREAD_MCP_URL = 'https://api.z.ai/api/mcp/zread/mcp'
+
+/** Namespace for the zread bridge: tools appear as mcp__zai-zread__<rawName>. */
+const ZREAD_SERVER_NAME = 'zai-zread'
+
 /** Z.ai monitoring API serving the real Coding Plan quota (same data zcode shows). */
 const QUOTA_URL = 'https://api.z.ai/api/monitor/usage/quota/limit'
 /** Monthly MCP tool usage on the same monitoring API. */
@@ -68,7 +76,7 @@ export const PROVIDER_ID = 'zai-mcp'
 const TOOL_NAME = 'web_search_prime'
 
 const PROTOCOL_VERSION = '2025-06-18'
-const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.7.0' }
+const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.8.0' }
 /** Retried once per search: a streamable-HTTP session the server dropped. */
 const SESSION_LOST_HTTP = new Set([400, 404])
 
@@ -163,6 +171,21 @@ export async function apply(ctx) {
     })
   } catch (error) {
     ctx.logger.error(`zai-web-search-mcp: vision MCP bridge failed to start (search, reader and quota keep working): ${String(error)}`)
+  }
+
+  // Zread MCP tool bridge: mcp__zai-zread__search_doc / read_file /
+  // get_repo_structure over public GitHub repositories. Non-fatal like the
+  // other bridges; nothing else in the plugin depends on it.
+  try {
+    await mcpClient.apply(ctx, {
+      serverName: ZREAD_SERVER_NAME,
+      transport: 'streamable-http',
+      url: ZREAD_MCP_URL,
+      headers: { Authorization: `Bearer ${apiKey}` },
+      failOnStartupError: false,
+    })
+  } catch (error) {
+    ctx.logger.error(`zai-web-search-mcp: zread MCP bridge failed to start (everything else keeps working): ${String(error)}`)
   }
 }
 

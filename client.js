@@ -258,6 +258,17 @@ window.__ModuleLoader__.load({
             mcpNote: 'MCP tool calls in the last 30 days',
             stale: 'data is stale — Z.ai is unreachable',
           })
+          ctx.locale.register(NS, 'zh', {
+            label: 'GLM Coding Plan 配额 (Z.ai)',
+            'zai-quota': 'GLM Coding Plan 配额 (Z.ai)',
+            plan: 'GLM Coding Plan',
+            fiveHour: '5 小时',
+            weekly: '每周',
+            mcpMonth: 'MCP · 30 天',
+            calls: '次调用',
+            mcpNote: '过去 30 天的 MCP 工具调用次数',
+            stale: '数据已过期 — 无法连接 Z.ai',
+          })
           t = ctx.locale.bind(NS)
           diag('locale-registered')
         } catch (error) {

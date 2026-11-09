@@ -43,6 +43,26 @@ pwsh -NoProfile -File install.ps1
 
 The installer is idempotent: it wires `~/.dsh/profiles/desktop/package.json` (bundle + `link:` dependency), checks/stores `ZAI_API_KEY`, and runs `pnpm install` using the node/pnpm bundled with dsh (nothing else to install). Then **restart DeepSeek Harness**.
 
+## Install for any user (npm)
+
+The DeepSeek Harness plugin manager installs third-party plugins **from the npm registry** (it auto-probes `registry.npmjs.org` / `npmmirror`). A package carrying the `dsh.bundle.patch` field is auto-activated after install — the user needs no manual profile edits:
+
+> Установи плагин `dsh-zai-web-search-mcp`
+
+…said to the in-app agent (it runs `install_bundle` with the npm spec), or install via the Plugins page. Then store your own `ZAI_API_KEY` credential (Models/credentials) and restart the app. Note: freshly published npm versions may be held back by the manager's `minimumReleaseAge` policy — the UI then offers the exact `name@version` to pin.
+
+The published package name is **`dsh-zai-web-search-mcp`** (this repo's dev install keeps the `@local/` link name; `scripts/prepare-npm.mjs` builds the publishable variant).
+
+### Maintainer: publish a new version
+
+```powershell
+node scripts/prepare-npm.mjs     # -> dist/npm/ (public name, engines.dsh, renamed patch row)
+npm login                        # once
+npm publish dist/npm
+```
+
+Bump `version` in `package.json` first (and `CLIENT_INFO` in `index.js`), sync the live copy, push the tag-less commit — CI checks syntax and that no secrets are in the tree.
+
 ## Verify
 
 ```powershell

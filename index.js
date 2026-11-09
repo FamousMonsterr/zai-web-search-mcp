@@ -206,7 +206,7 @@ function startQuotaService(ctx, getApiKey) {
       graphDebug = {
         hasService: graph !== undefined,
         entryCount: graph?.entries?.length ?? null,
-        includesThisPackage: graph?.entries?.some((entry) => entry.id === '@local/zai-web-search-mcp') === true,
+        includesThisPackage: graph?.entries?.some((entry) => entry.id === '@local/zai-web-search-mcp' || entry.id === 'dsh-zai-web-search-mcp') === true,
       }
     } catch (error) {
       graphDebug = { error: String(error instanceof Error ? error.message : error) }

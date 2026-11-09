@@ -5,6 +5,9 @@ copy the Queue column, swap names/links. Last full sweep: 2026-11-09 (v1.8.0).
 
 ## ✅ Done
 
+| Official MCP Registry | https://registry.modelcontextprotocol.io — io.github.FamousMonsterr/zai-coding-plan-mcp@1.0.1 | published |
+| npm (wrapper server) | https://www.npmjs.com/package/zai-coding-plan-mcp | live 1.0.1 |
+
 | Channel | Where | Status |
 |---|---|---|
 | npm | https://www.npmjs.com/package/dsh-zai-web-search-mcp | live, `latest` 1.8.0 |
@@ -34,7 +37,7 @@ copy the Queue column, swap names/links. Last full sweep: 2026-11-09 (v1.8.0).
 
 ## 📋 Queue (not started, free)
 
-- Official MCP Registry — add `server.json` + `npx mcp-publisher login github && npx mcp-publisher publish server.json` (device-flow GitHub auth). Feeds API Tracker, Glama, MCP Market and most aggregators at once — do FIRST. Namespace: `io.github.famousmonsterr/...` (org namespaces broken from CLI)
+~~Official MCP Registry~~ — DONE, see Done + `npx mcp-publisher login github && npx mcp-publisher publish server.json` (device-flow GitHub auth). Feeds API Tracker, Glama, MCP Market and most aggregators at once — do FIRST. Namespace: `io.github.famousmonsterr/...` (org namespaces broken from CLI)
 - GitHub MCP Registry (github.com/mcp) — new 2026 official catalog
 - **API Tracker** (apitracker.io) — 165k results; free submit form, manual review — cross-check from Apideck
 - **Microsoft MCP Center** — comment on GitHub issue at Azure/mcp-center (109 curated, 1–2 weeks onboarding) — cross-check from Apideck

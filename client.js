@@ -308,7 +308,8 @@ window.__ModuleLoader__.load({
           })
           t = ctx.locale.bind(NS)
           const snapshot = ctx.locale.getLocale()
-          const localeId = typeof snapshot === 'string' ? snapshot : snapshot?.id ?? snapshot?.locale
+          const active = typeof snapshot === 'string' ? snapshot : snapshot?.active
+          const localeId = typeof active === 'string' ? active : active?.id ?? snapshot?.id
           if (typeof localeId === 'string' && localeId.length > 0) appLocale = localeId
           diag('locale-registered')
         } catch (error) {

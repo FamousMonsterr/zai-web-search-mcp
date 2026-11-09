@@ -66,6 +66,20 @@ const QUOTA_TTL_MS = 60_000
 const QUOTA_BACKGROUND_MS = 5 * 60_000
 /** Shared quota endpoint this plugin serves the Web client on. */
 const QUOTA_ROUTE_PATH = '/zai-quota'
+/** npm registry document naming the latest published release. */
+const UPDATE_CHECK_URL = 'https://registry.npmjs.org/dsh-zai-web-search-mcp/latest'
+/** How often the host re-checks the registry for a newer release. */
+const UPDATE_CHECK_INTERVAL_MS = 24 * 3600_000
+
+/** Numeric compare of two loose semver strings ("1.9.2-rc.1" -> [1,9,2]). */
+function versionAtLeast(candidate, reference) {
+  const parse = (value) => (String(value).match(/(\d+)\.(\d+)\.(\d+)/) ?? []).slice(1, 4).map(Number)
+  const [aMajor, aMinor, aPatch] = parse(candidate)
+  const [bMajor, bMinor, bPatch] = parse(reference)
+  if (aMajor !== bMajor) return aMajor > bMajor
+  if (aMinor !== bMinor) return aMinor > bMinor
+  return aPatch >= bPatch
+}
 /** Client lifecycle diagnostics collector for the status chip (temporary). */
 const DIAG_ROUTE_PATH = '/zai-quota-diag'
 
@@ -76,7 +90,7 @@ export const PROVIDER_ID = 'zai-mcp'
 const TOOL_NAME = 'web_search_prime'
 
 const PROTOCOL_VERSION = '2025-06-18'
-const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.1' }
+const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.3' }
 /** Retried once per search: a streamable-HTTP session the server dropped. */
 const SESSION_LOST_HTTP = new Set([400, 404])
 
@@ -294,6 +308,36 @@ function startQuotaService(ctx, getApiKey) {
   const cache = new Map()
   /** Lifecycle + provider-capture diagnostics served on /zai-quota-diag. */
   const diag = []
+  /** Release notification: { current, latest, available } once checked. */
+  let updateInfo = null
+  let updateCheckedAt = 0
+  let updateInflight = null
+
+  /** Compare the running version with the npm latest; never throws. */
+  async function checkUpdate() {
+    updateInflight ??= (async () => {
+      try {
+        const response = await fetch(UPDATE_CHECK_URL, {
+          accept: 'application/json',
+          signal: AbortSignal.timeout(8_000),
+        })
+        const payload = response.ok ? await response.json() : null
+        const latest = typeof payload?.version === 'string' ? payload.version : null
+        updateInfo = {
+          current: CLIENT_INFO.version,
+          latest,
+          available: latest !== null && !versionAtLeast(CLIENT_INFO.version, latest),
+        }
+      } catch {
+        updateInfo = { current: CLIENT_INFO.version, latest: null, available: false }
+      } finally {
+        updateCheckedAt = Date.now()
+        updateInflight = null
+      }
+      return updateInfo
+    })()
+    return updateInflight
+  }
   /** sessionId -> { provider, at }: the provider of the session's most recent
    * LLM request, learned from the agent/request waterfall. Expires so a
    * dormant stale mapping never outlives a session switch. */
@@ -365,13 +409,18 @@ function startQuotaService(ctx, getApiKey) {
   }
 
   async function snapshot(sessionId) {
+    // Release notification: the first snapshot awaits the registry check, then
+    // it refreshes at most once a day. Dev links running unreleased code
+    // (registry older than local) never flag an update.
+    let update = updateInfo
+    if (Date.now() - updateCheckedAt >= UPDATE_CHECK_INTERVAL_MS) update = await checkUpdate()
     const provider = activeProvider(sessionId)
     const adapter = provider !== null ? QUOTA_ADAPTERS[provider] : undefined
     if (adapter === undefined) {
       // No adapter for the active provider: the chip hides; nothing is fetched.
-      return { ok: false, supported: false, provider, chip: null, fetchedAt: Date.now() }
+      return { ok: false, supported: false, provider, chip: null, update, fetchedAt: Date.now() }
     }
-    return await snapshotFor(provider, adapter)
+    return { ...(await snapshotFor(provider, adapter)), update }
   }
 
   const disposeDiagRoute = ctx.webServer.register({
@@ -809,6 +858,8 @@ function isAbortLike(error, signal) {
 function searchAbortedLike(WebError, signal) {
   return new WebError('Z.ai search aborted', 'WEB_ABORTED', { cause: signal?.aborted === true ? signal.reason : undefined })
 }
+
+
 
 
 

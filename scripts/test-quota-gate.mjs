@@ -127,6 +127,12 @@ async function main() {
   check('unknown session id: falls back to default (zai chip stays)',
     r5d.json.supported === true && r5d.json.provider === 'zai', `provider=${r5d.json.provider}`)
 
+  // Case 6: release notification rides along (live registry check)
+  const pkgVersion = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
+  check('update: current matches package version', r1.json.update?.current === pkgVersion, `${r1.json.update?.current} vs ${pkgVersion}`)
+  check('update: latest resolved from registry', typeof r1.json.update?.latest === 'string', String(r1.json.update?.latest))
+  check('update: dev/unreleased never flags available', r1.json.update?.available === false)
+
   const failed = checks.filter((c) => !c.ok)
   console.log(failed.length === 0 ? `\nALL ${checks.length} CHECKS PASSED` : `\n${failed.length}/${checks.length} CHECKS FAILED`)
   process.exit(failed.length === 0 ? 0 : 1)

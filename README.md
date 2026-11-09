@@ -57,6 +57,14 @@ myprovider: {
 
 Switching the default model to a provider without an adapter hides the chip instantly (no network calls); switching back restores it within one poll (≤60 s). Pre-push integration test: `node scripts/test-quota-gate.mjs` (drives the real `apply()` with a mock ctx against the live API — expects `ALL CHECKS PASSED`).
 
+### Updating
+
+There is no silent auto-update: the manager pins what it installed. The chip itself notifies you — the host checks the npm registry once a day and a **small green arrow** appears on the chip (and in the popover footer) while a newer release exists; clicking it inserts the update command into the composer, so you just press Enter. Nothing is shown when you are up to date, and a dev `@local` link running unreleased code never flags. To upgrade manually, tell the in-app agent:
+
+> Обнови плагин `dsh-zai-web-search-mcp`
+
+…and restart the app when it asks. Freshly published versions may be held back briefly by the manager's `minimumReleaseAge` supply-chain policy; the exact `name@version` pin from the UI installs immediately.
+
 PRs adding adapters for other services (DeepSeek balance, Anthropic usage, OpenAI billing, …) are very welcome — follow the `zai` entry, keep the key in the host, and add a verify check if the service offers a cheap status endpoint.
 
 ## Install (on a new computer)

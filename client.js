@@ -38,6 +38,8 @@ window.__ModuleLoader__.load({
         weekly: 'Weekly remaining',
         mcpMonth: 'Z.ai MCP',
         lastRefreshed: 'Last refreshed',
+        updateAvailable: 'Update available',
+        updateCommand: 'Update the dsh-zai-web-search-mcp plugin',
         calls: 'calls',
         mcpNote: 'MCP tool calls in the last 30 days',
         stale: 'data is stale — Z.ai is unreachable',
@@ -49,6 +51,8 @@ window.__ModuleLoader__.load({
         weekly: 'Остаток: неделя',
         mcpMonth: 'Z.ai MCP',
         lastRefreshed: 'Обновлено',
+        updateAvailable: 'Доступно обновление',
+        updateCommand: 'Обнови плагин dsh-zai-web-search-mcp',
         calls: 'вызовов',
         mcpNote: 'вызовы MCP-инструментов за 30 дней',
         stale: 'данные устарели — нет связи с Z.ai',
@@ -60,6 +64,8 @@ window.__ModuleLoader__.load({
         weekly: '每周剩余',
         mcpMonth: 'Z.ai MCP',
         lastRefreshed: '上次刷新',
+        updateAvailable: '有新版本',
+        updateCommand: '更新 dsh-zai-web-search-mcp 插件',
         calls: '次调用',
         mcpNote: '过去 30 天的 MCP 工具调用次数',
         stale: '数据已过期 — 无法连接 Z.ai',
@@ -199,6 +205,24 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** Tiny green up-arrow shown only while a newer release exists. Click
+     * inserts the localized update command into the composer draft. */
+    function UpdateArrow({ latest, onActivate, size }) {
+      const px = size ?? 10
+      return h('button', {
+        type: 'button',
+        className: 'zaiq-update',
+        title: `${t('updateAvailable')}: ${latest ?? ''} — ${t('updateCommand')}`,
+        'aria-label': `${t('updateAvailable')}: ${latest ?? ''}`,
+        onClick: (event) => {
+          event.stopPropagation()
+          try { onActivate() } catch { /* never break the chip */ }
+        },
+      },
+      h('svg', { viewBox: '0 0 10 10', width: px, height: px, 'aria-hidden': true },
+        h('path', { d: 'M5 1 L9 5 L6 5 L6 9 L4 9 L4 5 L1 5 Z', fill: 'currentColor' })))
+    }
+
     function QuotaChip(props) {
       const [data, setData] = React.useState(null)
       const [open, setOpen] = React.useState(false)
@@ -261,6 +285,11 @@ window.__ModuleLoader__.load({
         : (typeof data.level === 'string' && data.level ? data.level.toUpperCase() : '')
       const mcpColor = accentOf(skin, 'mcp', 'var(--dsw-alias-state-warn-primary)')
       const percent = remainingPercent(fiveHour) ?? 0
+      const updateAvailable = data.update?.available === true && typeof data.update.latest === 'string'
+      const insertUpdateCommand = () => {
+        const insert = props?.inputActions?.insertText
+        if (typeof insert === 'function') insert(t('updateCommand'))
+      }
       const tone = toneOf(percent)
       const popoverOpen = open
       // Edge-flip (issue #2): anchor the popover to the left when the wrapper
@@ -300,6 +329,9 @@ window.__ModuleLoader__.load({
           ),
           h('div', { className: 'zaiq-pop-foot' },
             h('span', null, `${t('lastRefreshed')}: ${fmtRefreshed(data.fetchedAt)}`),
+            updateAvailable
+              ? h(UpdateArrow, { latest: data.update.latest, onActivate: insertUpdateCommand, size: 12 })
+              : null,
             data.stale === true ? h('span', { className: 'zaiq-pop-stale' }, t('stale')) : null,
           ),
         ) : null,
@@ -313,6 +345,7 @@ window.__ModuleLoader__.load({
         },
         h(Ring, { percent, tone, skin }),
         h('span', { className: 'zaiq-trigger-text' }, `${percent}%`),
+        updateAvailable ? h(UpdateArrow, { latest: data.update.latest, onActivate: insertUpdateCommand, size: 9 }) : null,
         )),
       )
     }
@@ -347,6 +380,8 @@ window.__ModuleLoader__.load({
 .zaiq-bar{height:6px;border-radius:9999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden}
 .zaiq-mcp-note{font-size:11px;color:var(--dsw-alias-label-secondary);line-height:1.3}
 .zaiq-pop-foot{margin-top:12px;display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:11px;color:var(--dsw-alias-label-secondary)}
+.zaiq-update{display:inline-flex;align-items:center;justify-content:center;padding:2px;border:none;background:transparent;border-radius:6px;color:var(--dsw-alias-state-success-primary);cursor:pointer;line-height:0}
+.zaiq-update:hover{background:var(--dsw-alias-bg-layer-2)}
 .zaiq-pop-stale{font-size:11px;color:var(--dsw-alias-state-warn-primary)}
 `)
     }

@@ -66,12 +66,21 @@ window.__ModuleLoader__.load({
       },
     }
     let appLocale = 'en'
-    /** Adopt any locale shape: 'ru', 'ru-RU', {active}, {active:{id}}. */
+    let localeMissBeaconed = false
+    /** Adopt any locale shape: 'ru', 'ru-RU', {active}, {active:{id}};
+     * unknown codes fall back to English and report once to the diag route. */
     function pickLocale(value) {
       if (typeof value !== 'string' && value?.active !== undefined) value = typeof value.active === 'string' ? value.active : value.active?.id
       if (typeof value !== 'string' || value.length === 0) return
       const short = value.split('-')[0]
-      if (DICTS[short] !== undefined) appLocale = short
+      if (DICTS[short] !== undefined) {
+        appLocale = short
+        return
+      }
+      if (!localeMissBeaconed) {
+        localeMissBeaconed = true
+        diag('locale-lookup-miss', value)
+      }
     }
     let t = (key) => DICTS[appLocale][key] ?? DICTS.en[key] ?? key
     let renderBeaconed = false
@@ -180,6 +189,7 @@ window.__ModuleLoader__.load({
       const [data, setData] = React.useState(null)
       const [open, setOpen] = React.useState(false)
       const [, forceTick] = React.useReducer((x) => x + 1, 0)
+      const wrapRef = React.useRef(null)
 
       if (!renderBeaconed) {
         renderBeaconed = true
@@ -224,15 +234,23 @@ window.__ModuleLoader__.load({
       const percent = remainingPercent(fiveHour) ?? 0
       const tone = toneOf(percent)
       const popoverOpen = open
+      // Edge-flip (issue #2): anchor the popover to the left when the wrapper
+      // sits too close to the viewport's left edge for a right-anchored panel.
+      let flipLeft = false
+      if (popoverOpen && wrapRef.current !== null && typeof wrapRef.current.getBoundingClientRect === 'function') {
+        const rect = wrapRef.current.getBoundingClientRect()
+        flipLeft = rect.left < 440
+      }
 
       return h(React.Fragment, null,
         h(QuotaChipStyle),
         h('div', {
           className: 'zaiq-wrap',
+          ref: wrapRef,
           onMouseEnter: () => setOpen(true),
           onMouseLeave: () => setOpen(false),
         },
-        popoverOpen ? h('div', { className: 'zaiq-pop', role: 'dialog', 'aria-label': t('label') },
+        popoverOpen ? h('div', { className: `zaiq-pop${flipLeft ? ' zaiq-pop-left' : ''}`, role: 'dialog', 'aria-label': t('label') },
           h('div', { className: 'zaiq-pop-head' },
             h('span', { className: 'zaiq-pop-title' }, t('title')),
             h('span', { className: 'zaiq-pop-level' }, typeof data.level === 'string' && data.level ? data.level.toUpperCase() : ''),
@@ -282,13 +300,14 @@ window.__ModuleLoader__.load({
 .zaiq-ring.zaiq-critical .zaiq-ring-arc{stroke:var(--dsw-alias-state-error-primary)}
 .zaiq-trigger.zaiq-warn .zaiq-trigger-text{color:var(--dsw-alias-state-warn-primary)}
 .zaiq-trigger.zaiq-critical .zaiq-trigger-text{color:var(--dsw-alias-state-error-primary)}
-.zaiq-pop{position:absolute;bottom:calc(100% + 10px);right:0;z-index:60;min-width:330px;padding:14px 16px;border-radius:12px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-overlay);box-shadow:0 8px 28px rgba(15,23,42,.16);color:var(--dsw-alias-label-primary);text-align:left}
+.zaiq-pop{position:absolute;bottom:calc(100% + 10px);right:0;z-index:60;width:max-content;min-width:280px;max-width:min(420px,calc(100vw - 32px));padding:14px 16px;border-radius:12px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-overlay);box-shadow:0 8px 28px rgba(15,23,42,.16);color:var(--dsw-alias-label-primary);text-align:left}
+.zaiq-pop.zaiq-pop-left{left:0;right:auto}
 .zaiq-pop-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 .zaiq-pop-title{font-size:14px;font-weight:600}
 .zaiq-pop-level{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:9999px;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}
 .zaiq-pop-grid{display:flex;gap:20px}
 .zaiq-col{flex:1;min-width:0}
-.zaiq-col-label{font-size:12px;color:var(--dsw-alias-label-secondary);margin-bottom:6px;white-space:nowrap}
+.zaiq-col-label{font-size:12px;color:var(--dsw-alias-label-secondary);margin-bottom:6px;white-space:normal;overflow-wrap:break-word}
 .zaiq-col-value{display:flex;align-items:baseline;gap:4px;margin-bottom:8px;white-space:nowrap}
 .zaiq-col-percent{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
 .zaiq-col-percent.zaiq-warn{color:var(--dsw-alias-state-warn-primary)}

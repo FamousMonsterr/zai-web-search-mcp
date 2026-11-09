@@ -221,7 +221,8 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         let alive = true
-        const load = () => fetch('/zai-quota')
+        const sessionId = typeof props?.sessionId === 'string' && props.sessionId.length > 0 ? props.sessionId : null
+        const load = () => fetch(`/zai-quota${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`)
           .then((response) => {
             diag('quota-fetch-status', response.status)
             return response.ok ? response.json() : null

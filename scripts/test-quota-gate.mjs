@@ -18,6 +18,7 @@ const routes = {}
 const registeredProviders = []
 const searchProviders = []
 const appliedBridges = []
+const listeners = {}
 
 const mockCtx = {
   credentials: { resolve: async () => ({ value: key, source: 'test' }) },
@@ -29,7 +30,7 @@ const mockCtx = {
   webServer: { register: (route) => { routes[route.path] = route.handler; return () => {} } },
   logger: { error: (...a) => console.error('[logger]', ...a), warn: () => {}, info: () => {} },
   effect: () => () => {},
-  on: () => () => {},
+  on: (name, cb) => { (listeners[name] ??= []).push(cb); return () => {} },
   get: (name) => {
     if (name === 'agentDefaultModel') {
       return { currentSelection: () => ({ provider: activeProvider, model: 'glm-5.3' }) }
@@ -38,7 +39,16 @@ const mockCtx = {
   },
 }
 
-async function callQuota() {
+async function fireAgentRequest(sessionId, provider) {
+  const cbs = listeners['agent/request'] ?? []
+  if (cbs.length === 0) throw new Error('agent/request listener not registered')
+  for (const cb of cbs) {
+    const config = await cb({ agent: { session: { id: sessionId } } }, async () => ({ provider }))
+    if (config.provider !== provider) throw new Error('agent/request chain broke: config not returned')
+  }
+}
+
+async function callQuota(sessionId) {
   const handler = routes['/zai-quota']
   if (typeof handler !== 'function') throw new Error('/zai-quota route not registered')
   let body = ''
@@ -47,7 +57,8 @@ async function callQuota() {
     writeHead: (code) => { status = code },
     end: (payload) => { body = payload ?? '' },
   }
-  await handler({ method: 'GET' }, res)
+  const url = sessionId ? `/zai-quota?session=${encodeURIComponent(sessionId)}` : '/zai-quota'
+  await handler({ method: 'GET', url }, res)
   return { status, json: JSON.parse(body) }
 }
 
@@ -99,6 +110,22 @@ async function main() {
   mockCtx.get = () => undefined
   const r4 = await callQuota()
   check('no provider service: supported=false chip=null', r4.json.supported === false && r4.json.chip === null)
+
+  // Case 5: SESSION-scoped gating - a session on a local provider hides the
+  // chip even while the profile default stays zai; a zai session keeps it.
+  mockCtx.get = (name) => name === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'zai', model: 'glm-5.3' }) } : undefined
+  await fireAgentRequest('session-local-111', 'cybervulkan')
+  const r5 = await callQuota('session-local-111')
+  check('session on local provider: supported=false chip=null (default still zai)',
+    r5.json.supported === false && r5.json.chip === null, `provider=${r5.json.provider}`)
+  const r5b = await callQuota()
+  check('no session param: falls back to default zai', r5b.json.supported === true, `provider=${r5b.json.provider}`)
+  await fireAgentRequest('session-glm-222', 'zai')
+  const r5c = await callQuota('session-glm-222')
+  check('session on zai: supported=true windows present', r5c.json.supported === true && r5c.json.windows?.length === 2)
+  const r5d = await callQuota('session-unknown-333')
+  check('unknown session id: falls back to default (zai chip stays)',
+    r5d.json.supported === true && r5d.json.provider === 'zai', `provider=${r5d.json.provider}`)
 
   const failed = checks.filter((c) => !c.ok)
   console.log(failed.length === 0 ? `\nALL ${checks.length} CHECKS PASSED` : `\n${failed.length}/${checks.length} CHECKS FAILED`)

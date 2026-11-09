@@ -76,7 +76,7 @@ export const PROVIDER_ID = 'zai-mcp'
 const TOOL_NAME = 'web_search_prime'
 
 const PROTOCOL_VERSION = '2025-06-18'
-const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.0' }
+const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.1' }
 /** Retried once per search: a streamable-HTTP session the server dropped. */
 const SESSION_LOST_HTTP = new Set([400, 404])
 
@@ -292,9 +292,44 @@ const QUOTA_ADAPTERS = {
 function startQuotaService(ctx, getApiKey) {
   /** provider id -> { value, fetchedAt, inflight } */
   const cache = new Map()
+  /** Lifecycle + provider-capture diagnostics served on /zai-quota-diag. */
+  const diag = []
+  /** sessionId -> { provider, at }: the provider of the session's most recent
+   * LLM request, learned from the agent/request waterfall. Expires so a
+   * dormant stale mapping never outlives a session switch. */
+  const sessionProviders = new Map()
+  const SESSION_PROVIDER_TTL_MS = 3600_000
+  let providerCaptureBeaconed = false
 
-  /** The active default-model provider id, or null when unreadable. */
-  function activeProvider() {
+  // The profile default is only a fallback: the chip lives in a session, so
+  // the session's own model decides. Captured without ever failing the chain.
+  ctx.on('agent/request', async (payload, next) => {
+    const config = await next()
+    try {
+      const agent = payload?.agent
+      const sessionId = agent?.session?.id ?? agent?.sessionId ?? (typeof agent?.id === 'string' ? agent.id : null)
+      const provider = typeof config?.provider === 'string' && config.provider.length > 0
+        ? config.provider
+        : (typeof config?.model?.provider === 'string' ? config.model.provider : null)
+      if (sessionId !== null && provider !== null) {
+        sessionProviders.set(sessionId, { provider, at: Date.now() })
+        if (!providerCaptureBeaconed) {
+          providerCaptureBeaconed = true
+          diag.push({ at: new Date().toISOString(), event: 'provider-capture', detail: `sid=${String(sessionId).slice(0, 18)} provider=${provider}` })
+        }
+      }
+    } catch { /* diagnostics/capture must never break the request */ }
+    return config
+  })
+
+  /** The provider gating this snapshot: the session's own model once observed
+   * (queried with ?session=), else the profile default-model provider — a
+   * fresh session on the default GLM keeps its chip before the first message. */
+  function activeProvider(sessionId) {
+    if (typeof sessionId === 'string' && sessionId.length > 0) {
+      const known = sessionProviders.get(sessionId)
+      if (known !== undefined && Date.now() - known.at < SESSION_PROVIDER_TTL_MS) return known.provider
+    }
     try {
       const selection = ctx.get('agentDefaultModel')?.currentSelection?.()
       return typeof selection?.provider === 'string' && selection.provider.length > 0 ? selection.provider : null
@@ -329,8 +364,8 @@ function startQuotaService(ctx, getApiKey) {
     return entry.inflight
   }
 
-  async function snapshot() {
-    const provider = activeProvider()
+  async function snapshot(sessionId) {
+    const provider = activeProvider(sessionId)
     const adapter = provider !== null ? QUOTA_ADAPTERS[provider] : undefined
     if (adapter === undefined) {
       // No adapter for the active provider: the chip hides; nothing is fetched.
@@ -339,7 +374,6 @@ function startQuotaService(ctx, getApiKey) {
     return await snapshotFor(provider, adapter)
   }
 
-  const diag = []
   const disposeDiagRoute = ctx.webServer.register({
     kind: 'exact',
     path: DIAG_ROUTE_PATH,
@@ -367,8 +401,10 @@ function startQuotaService(ctx, getApiKey) {
   const disposeRoute = ctx.webServer.register({
     kind: 'exact',
     path: QUOTA_ROUTE_PATH,
-    async handler(_request, response) {
-      const body = JSON.stringify(await snapshot())
+    async handler(request, response) {
+      const url = new URL(request.url ?? '/', 'http://quota.local')
+      const sessionId = url.searchParams.get('session') ?? undefined
+      const body = JSON.stringify(await snapshot(sessionId && sessionId.length > 0 ? sessionId : undefined))
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
       response.end(body)
     },
@@ -773,6 +809,7 @@ function isAbortLike(error, signal) {
 function searchAbortedLike(WebError, signal) {
   return new WebError('Z.ai search aborted', 'WEB_ABORTED', { cause: signal?.aborted === true ? signal.reason : undefined })
 }
+
 
 
 

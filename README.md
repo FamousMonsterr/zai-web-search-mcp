@@ -143,11 +143,11 @@ The web-search and MCP-tool surfaces do not depend on the chip and work regardle
 
 The quota chip sits in the composer stats row next to the context meter:
 
-![Quota chip in the composer stats row](docs/quota-chip.png)
+![Quota chip in the composer stats row](docs/quota-chip-en.png)
 
 Hovering it opens the usage popover — the 5-hour and weekly credit windows with reset times, plus MCP tool calls in the last 30 days:
 
-![Quota popover](docs/quota-popover.png)
+![Quota popover](docs/quota-popover-en.png)
 
 > v1.6.0 mount fix: the chip component no longer calls `setState` during render (that triggered React's "Too many re-renders", and the slot's error boundary silently evicted the entry — the chip vanished before its first effect ran). Visibility is now purely derived; registration mirrors the built-in `activity`/`usage` pills exactly (generator factory, `locale`, order 2) with `dsh.client.immediately: true`.
 

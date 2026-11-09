@@ -28,6 +28,7 @@ window.__ModuleLoader__.load({
     const TICK_MS = 30_000
 
     let t = (key) => key
+    let appLocale
     let renderBeaconed = false
 
     /** Lifecycle diagnostics: report milestones and failures to the Host route. */
@@ -49,15 +50,18 @@ window.__ModuleLoader__.load({
       return String(Math.round(value))
     }
 
-    /** "22:37" when the reset is today, otherwise "12 ноя". */
+    /** "22:37" when the reset is today, otherwise "Nov 12"; follows the app
+     * locale (the empty-locale [] form would silently use the OS locale and
+     * leak Russian dates into the English/Chinese UI). */
     function fmtResetAt(at) {
       if (!(at > 0)) return '—'
       const date = new Date(at)
       const now = new Date()
       const sameDay = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()
+      const locale = appLocale !== undefined && typeof appLocale === 'string' && appLocale.length > 0 ? [appLocale] : undefined
       return sameDay
-        ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : date.toLocaleDateString([], { day: 'numeric', month: 'short' })
+        ? date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+        : date.toLocaleDateString(locale, { day: 'numeric', month: 'short' })
     }
 
     function toneOf(percent) {
@@ -270,6 +274,9 @@ window.__ModuleLoader__.load({
             stale: '数据已过期 — 无法连接 Z.ai',
           })
           t = ctx.locale.bind(NS)
+          const snapshot = ctx.locale.getLocale()
+          const localeId = typeof snapshot === 'string' ? snapshot : snapshot?.id ?? snapshot?.locale
+          if (typeof localeId === 'string' && localeId.length > 0) appLocale = localeId
           diag('locale-registered')
         } catch (error) {
           diag('locale-register-failed', error)

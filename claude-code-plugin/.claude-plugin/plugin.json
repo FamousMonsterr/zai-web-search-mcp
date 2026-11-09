@@ -1,0 +1,10 @@
+{
+  "name": "zai-web-search-mcp",
+  "description": "Z.ai (GLM Coding Plan) web search and reading for Claude Code via MCP: web_search_prime, webReader, vision and zread tools using your own API key.",
+  "version": "1.8.0",
+  "author": { "name": "FamousMonsterr" },
+  "homepage": "https://github.com/FamousMonsterr/zai-web-search-mcp",
+  "repository": "https://github.com/FamousMonsterr/zai-web-search-mcp",
+  "license": "MIT",
+  "keywords": ["zai", "glm", "web-search", "mcp", "coding-plan"]
+}

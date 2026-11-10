@@ -90,7 +90,7 @@ export const PROVIDER_ID = 'zai-mcp'
 const TOOL_NAME = 'web_search_prime'
 
 const PROTOCOL_VERSION = '2025-06-18'
-const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.4' }
+const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.5' }
 /** Retried once per search: a streamable-HTTP session the server dropped. */
 const SESSION_LOST_HTTP = new Set([400, 404])
 
@@ -384,13 +384,13 @@ function startQuotaService(ctx, getApiKey) {
     cache.clear()
   }
 
-  async function snapshotFor(provider, adapter) {
+  async function snapshotFor(provider, adapter, force = false) {
     let entry = cache.get(provider)
     if (entry === undefined) {
       entry = { value: null, fetchedAt: 0, inflight: null }
       cache.set(provider, entry)
     }
-    if (entry.value !== null && Date.now() - entry.fetchedAt < QUOTA_TTL_MS) {
+    if (!force && entry.value !== null && Date.now() - entry.fetchedAt < QUOTA_TTL_MS) {
       return { ...entry.value, provider, supported: true, skin: adapter.skin ?? null }
     }
     entry.inflight ??= adapter.fetchQuota(getApiKey).then(
@@ -408,7 +408,7 @@ function startQuotaService(ctx, getApiKey) {
     return entry.inflight
   }
 
-  async function snapshot(sessionId) {
+  async function snapshot(sessionId, force = false) {
     // Release notification: the first snapshot awaits the registry check, then
     // it refreshes at most once a day. Dev links running unreleased code
     // (registry older than local) never flag an update.
@@ -420,7 +420,7 @@ function startQuotaService(ctx, getApiKey) {
       // No adapter for the active provider: the chip hides; nothing is fetched.
       return { ok: false, supported: false, provider, chip: null, update, fetchedAt: Date.now() }
     }
-    return { ...(await snapshotFor(provider, adapter)), update }
+    return { ...(await snapshotFor(provider, adapter, force)), update }
   }
 
   const disposeDiagRoute = ctx.webServer.register({
@@ -453,7 +453,8 @@ function startQuotaService(ctx, getApiKey) {
     async handler(request, response) {
       const url = new URL(request.url ?? '/', 'http://quota.local')
       const sessionId = url.searchParams.get('session') ?? undefined
-      const body = JSON.stringify(await snapshot(sessionId && sessionId.length > 0 ? sessionId : undefined))
+      const force = url.searchParams.get('refresh') === '1'
+      const body = JSON.stringify(await snapshot(sessionId && sessionId.length > 0 ? sessionId : undefined, force))
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
       response.end(body)
     },

@@ -305,7 +305,7 @@ window.__ModuleLoader__.load({
         h('div', {
           className: 'zaiq-wrap',
           ref: wrapRef,
-          onMouseEnter: () => setOpen(true),
+          onMouseEnter: () => { setOpen(true); fetch('/zai-quota?refresh=1').then((r) => r.ok ? r.json() : null).then((snap) => { if (snap && snap.ok) setData(snap) }).catch(() => {}) },
           onMouseLeave: () => setOpen(false),
         },
         popoverOpen ? h('div', { className: `zaiq-pop${flipLeft ? ' zaiq-pop-left' : ''}`, role: 'dialog', 'aria-label': t('label') },

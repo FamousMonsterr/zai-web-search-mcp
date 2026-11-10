@@ -27,6 +27,11 @@
 // "entries did not activate" on every start. A duplicate rejection is benign:
 // the first registration already owns the id and serves all consumers;
 // anything else is logged for diagnostics instead of crashing the boot.
+// v1.9.7: the update arrow becomes a real pipeline (issue #3): click POSTs
+// /zai-update, polls /zai-update/status every 800 ms, renders "↓ NN%" in
+// place of the arrow, then either the arrow disappears (tooltip "✓ updated
+// vX.Y.Z" for one poll cycle) or it turns into "⟳ reload app" when the host
+// still reports an update. Everything in try/catch — never break the chip.
 const registration = {
   id: '@local/zai-web-search-mcp',
   factory(require) {
@@ -49,6 +54,9 @@ const registration = {
         lastRefreshed: 'Last refreshed',
         updateAvailable: 'Update available',
         updateCommand: 'Update the dsh-zai-web-search-mcp plugin',
+        updateDone: '✓ updated vX.Y.Z',
+        updateRestart: '⟳ reload app',
+        updateFailed: 'Update failed',
         calls: 'calls',
         mcpNote: 'MCP tool calls in the last 30 days',
         stale: 'data is stale — Z.ai is unreachable',
@@ -62,6 +70,9 @@ const registration = {
         lastRefreshed: 'Обновлено',
         updateAvailable: 'Доступно обновление',
         updateCommand: 'Обнови плагин dsh-zai-web-search-mcp',
+        updateDone: '✓ обновлено vX.Y.Z',
+        updateRestart: '⟳ перезагрузить приложение',
+        updateFailed: 'Не удалось обновиться',
         calls: 'вызовов',
         mcpNote: 'вызовы MCP-инструментов за 30 дней',
         stale: 'данные устарели — нет связи с Z.ai',
@@ -75,6 +86,9 @@ const registration = {
         lastRefreshed: '上次刷新',
         updateAvailable: '有新版本',
         updateCommand: '更新 dsh-zai-web-search-mcp 插件',
+        updateDone: '✓ 已更新 vX.Y.Z',
+        updateRestart: '⟳ 重启应用',
+        updateFailed: '更新失败',
         calls: '次调用',
         mcpNote: '过去 30 天的 MCP 工具调用次数',
         stale: '数据已过期 — 无法连接 Z.ai',
@@ -215,17 +229,23 @@ const registration = {
     }
 
     /** Tiny green up-arrow shown only while a newer release exists. Click
-     * inserts the localized update command into the composer draft. */
-    function UpdateArrow({ latest, onActivate, size }) {
+     * starts the real self-update pipeline (POST /zai-update). A previous
+     * failure rides along as the tooltip title. */
+    function UpdateArrow({ latest, onStart, size, error }) {
       const px = size ?? 10
+      const failure = error === null || error === undefined ? '' : String(error)
+      const base = `${t('updateAvailable')}: ${latest ?? ''}`
+      const title = failure.length > 0
+        ? `${t('updateFailed')}: ${failure.slice(0, 140)}`
+        : `${base} — ${t('updateCommand')}`
       return h('button', {
         type: 'button',
         className: 'zaiq-update',
-        title: `${t('updateAvailable')}: ${latest ?? ''} — ${t('updateCommand')}`,
-        'aria-label': `${t('updateAvailable')}: ${latest ?? ''}`,
+        title,
+        'aria-label': base,
         onClick: (event) => {
           event.stopPropagation()
-          try { onActivate() } catch { /* never break the chip */ }
+          try { onStart() } catch { /* never break the chip */ }
         },
       },
       h('svg', { viewBox: '0 0 10 10', width: px, height: px, 'aria-hidden': true },
@@ -237,6 +257,120 @@ const registration = {
       const [open, setOpen] = React.useState(false)
       const [, forceTick] = React.useReducer((x) => x + 1, 0)
       const wrapRef = React.useRef(null)
+      // Self-update pipeline (issue #3): phase mirrors the arrow states
+      // (idle -> running -> done|restart|idle), `updateLive` carries the
+      // polled percent/stage and the last error for the tooltip.
+      const [updatePhase, setUpdatePhase] = React.useState('idle')
+      const [updateLive, setUpdateLive] = React.useState({ percent: 0, stage: null, error: null, version: null })
+      const updatePhaseRef = React.useRef('idle')
+      const updateTimerRef = React.useRef(null)
+
+      const setPhase = (phase) => {
+        updatePhaseRef.current = phase
+        setUpdatePhase(phase)
+      }
+      const stopUpdatePolling = () => {
+        if (updateTimerRef.current !== null) {
+          clearInterval(updateTimerRef.current)
+          updateTimerRef.current = null
+        }
+      }
+      /** Poll /zai-update/status every 800 ms while an update runs. */
+      const pollUpdateStatus = () => {
+        if (updateTimerRef.current !== null) return // already polling
+        updateTimerRef.current = setInterval(() => {
+          try {
+            fetch('/zai-update/status')
+              .then((response) => response.ok ? response.json() : null)
+              .then((status) => {
+                if (status === null || status === undefined) return
+                if (status.running === true) {
+                  setUpdateLive({ percent: status.percent ?? 0, stage: status.stage ?? null, error: null, version: null })
+                  return
+                }
+                if (status.startedAt === null || status.startedAt === undefined) return // no run recorded yet
+                if (status.error !== null && status.error !== undefined && String(status.error).length > 0) {
+                  // Surface the error as the arrow title, back to idle.
+                  stopUpdatePolling()
+                  setUpdateLive((prev) => ({ ...prev, error: String(status.error) }))
+                  setPhase('idle')
+                  return
+                }
+                finishUpdate(status)
+              })
+              .catch(() => { /* transient poll failures keep the run going */ })
+          } catch { /* never break the chip */ }
+        }, 800)
+      }
+      /** Run finished cleanly: re-check the quota; the arrow disappears when
+       * the host now reports up-to-date, otherwise offer the reload fallback. */
+      const finishUpdate = (status) => {
+        stopUpdatePolling()
+        try {
+          fetch('/zai-quota?refresh=1')
+            .then((response) => response.ok ? response.json() : null)
+            .then((snap) => {
+              if (snap !== null && snap.update?.available === false) {
+                setUpdateLive({ percent: 100, stage: null, error: null, version: snap.update.latest ?? status?.resultVersion ?? null })
+                setPhase('done')
+                // One-shot tooltip: cleared after one quota poll cycle.
+                setTimeout(() => { try { if (updatePhaseRef.current === 'done') setPhase('idle') } catch { } }, POLL_MS)
+              } else {
+                setPhase('restart') // HMR missed the swap: the client needs an app reload
+              }
+            })
+            .catch(() => setPhase('restart'))
+        } catch { try { setPhase('restart') } catch { /* never break the chip */ } }
+      }
+      /** Arrow click: start the pipeline, then poll. Single-flight client-side. */
+      const startUpdate = () => {
+        try {
+          if (updatePhaseRef.current === 'running') return
+          setUpdateLive({ percent: 0, stage: null, error: null, version: null })
+          setPhase('running')
+          pollUpdateStatus() // start polling first so a fast run is still observed
+          fetch('/zai-update', { method: 'POST' })
+            .then(async (response) => {
+              const payload = await response.json().catch(() => null)
+              if (response.ok !== true || payload === null || payload.ok !== true) {
+                throw new Error(payload !== null && payload?.error ? String(payload.error) : `HTTP ${response.status}`)
+              }
+            })
+            .catch((error) => {
+              diag('update-start-failed', error)
+              try {
+                stopUpdatePolling()
+                setUpdateLive((prev) => ({ ...prev, error: String(error?.message ?? error) }))
+                setPhase('idle')
+              } catch { /* never break the chip */ }
+            })
+        } catch (error) {
+          diag('update-click-crashed', error)
+          try { stopUpdatePolling() } catch { }
+          try { setPhase('idle') } catch { /* never break the chip */ }
+        }
+      }
+
+      // Resume a run that started elsewhere (chip remounted mid-update).
+      React.useEffect(() => {
+        let alive = true
+        try {
+          fetch('/zai-update/status')
+            .then((response) => response.ok ? response.json() : null)
+            .then((status) => {
+              if (!alive || status === null || status.running !== true) return
+              setUpdateLive({ percent: status.percent ?? 0, stage: status.stage ?? null, error: null, version: null })
+              setPhase('running')
+              pollUpdateStatus()
+            })
+            .catch(() => { })
+        } catch { /* never break the chip */ }
+        return () => { alive = false }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [])
+      React.useEffect(() => () => {
+        try { stopUpdatePolling() } catch { /* never break the chip */ }
+      }, [])
 
       if (!renderBeaconed) {
         renderBeaconed = true
@@ -295,9 +429,42 @@ const registration = {
       const mcpColor = accentOf(skin, 'mcp', 'var(--dsw-alias-state-warn-primary)')
       const percent = remainingPercent(fiveHour) ?? 0
       const updateAvailable = data.update?.available === true && typeof data.update.latest === 'string'
-      const insertUpdateCommand = () => {
-        const insert = props?.inputActions?.insertText
-        if (typeof insert === 'function') insert(t('updateCommand'))
+      /** "✓ updated v1.9.7": the locale template carries a vX.Y.Z placeholder. */
+      const fmtUpdateDone = (version) => {
+        const template = t('updateDone')
+        return typeof version === 'string' && version.length > 0
+          ? template.replace('vX.Y.Z', version.startsWith('v') ? version : `v${version}`)
+          : template.replace('vX.Y.Z', '').trim()
+      }
+      /** The update control in both the popover footer and the trigger row:
+       * percent while running, done-toast, reload button, or the plain arrow. */
+      const renderUpdateControl = (size) => {
+        try {
+          if (updatePhase === 'running') {
+            return h('span', {
+              className: 'zaiq-update-progress',
+              title: `${t('updateAvailable')}: ${updateLive.stage ?? '…'} — ${updateLive.percent}%`,
+            }, `↓ ${updateLive.percent}%`)
+          }
+          if (updatePhase === 'done') {
+            return h('span', { className: 'zaiq-update-toast', title: fmtUpdateDone(updateLive.version) }, fmtUpdateDone(updateLive.version))
+          }
+          if (updatePhase === 'restart') {
+            return h('button', {
+              type: 'button',
+              className: 'zaiq-update-restart',
+              title: t('updateRestart'),
+              onClick: (event) => {
+                event.stopPropagation()
+                try { location.reload() } catch { /* never break the chip */ }
+              },
+            }, t('updateRestart'))
+          }
+          if (updateAvailable) {
+            return h(UpdateArrow, { latest: data.update.latest, onStart: startUpdate, size, error: updateLive.error })
+          }
+          return null
+        } catch { return null }
       }
       const tone = toneOf(percent)
       const popoverOpen = open
@@ -338,9 +505,7 @@ const registration = {
           ),
           h('div', { className: 'zaiq-pop-foot' },
             h('span', null, `${t('lastRefreshed')}: ${fmtRefreshed(data.fetchedAt)}`),
-            updateAvailable
-              ? h(UpdateArrow, { latest: data.update.latest, onActivate: insertUpdateCommand, size: 12 })
-              : null,
+            renderUpdateControl(12),
             data.stale === true ? h('span', { className: 'zaiq-pop-stale' }, t('stale')) : null,
           ),
         ) : null,
@@ -354,7 +519,7 @@ const registration = {
         },
         h(Ring, { percent, tone, skin }),
         h('span', { className: 'zaiq-trigger-text' }, `${percent}%`),
-        updateAvailable ? h(UpdateArrow, { latest: data.update.latest, onActivate: insertUpdateCommand, size: 9 }) : null,
+        renderUpdateControl(9),
         )),
       )
     }
@@ -391,6 +556,11 @@ const registration = {
 .zaiq-pop-foot{margin-top:12px;display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:11px;color:var(--dsw-alias-label-secondary)}
 .zaiq-update{display:inline-flex;align-items:center;justify-content:center;padding:2px;border:none;background:transparent;border-radius:6px;color:var(--dsw-alias-state-success-primary);cursor:pointer;line-height:0}
 .zaiq-update:hover{background:var(--dsw-alias-bg-layer-2)}
+.zaiq-update-progress{display:inline-flex;align-items:center;font-size:11px;font-weight:600;line-height:20px;color:var(--dsw-alias-state-warn-primary);font-variant-numeric:tabular-nums;cursor:default;animation:zaiq-update-pulse 1.2s ease-in-out infinite}
+.zaiq-update-toast{font-size:11px;line-height:20px;color:var(--dsw-alias-state-success-primary);white-space:nowrap}
+.zaiq-update-restart{display:inline-flex;align-items:center;padding:1px 6px;border:none;background:transparent;border-radius:6px;font-size:11px;line-height:20px;font-family:inherit;color:var(--dsw-alias-state-warn-primary);cursor:pointer;white-space:nowrap}
+.zaiq-update-restart:hover{background:var(--dsw-alias-bg-layer-2)}
+@keyframes zaiq-update-pulse{0%,100%{opacity:1}50%{opacity:.55}}
 .zaiq-pop-stale{font-size:11px;color:var(--dsw-alias-state-warn-primary)}
 `)
     }

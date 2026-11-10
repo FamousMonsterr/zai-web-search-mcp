@@ -24,6 +24,17 @@
 // and Loader !!js config expressions are synchronous, so this plugin resolves
 // the credential asynchronously through the public ctx.credentials seam and
 // keeps it out of configuration files and conversation text.
+//
+// v1.9.7: the quota service also serves the plugin self-update pipeline
+// (issue #3): POST /zai-update runs `pnpm update dsh-zai-web-search-mcp
+// --latest --reporter=ndjson` inside the profile directory (single-flight,
+// 10-minute kill cap) and GET /zai-update/status exposes live progress so the
+// client chip can show the percent instead of a dead update command.
+
+import { spawn } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 /** Credential reference (environment-variable style name) holding the Z.ai API key. */
 const API_KEY_REF = 'ZAI_API_KEY'
@@ -70,6 +81,20 @@ const QUOTA_ROUTE_PATH = '/zai-quota'
 const UPDATE_CHECK_URL = 'https://registry.npmjs.org/dsh-zai-web-search-mcp/latest'
 /** How often the host re-checks the registry for a newer release. */
 const UPDATE_CHECK_INTERVAL_MS = 24 * 3600_000
+/** Self-update routes: POST starts the run, GET .../status exposes progress. */
+const UPDATE_ROUTE_PATH = '/zai-update'
+const UPDATE_STATUS_ROUTE_PATH = '/zai-update/status'
+/** The one npm dependency the self-update pipeline keeps current. */
+const UPDATE_PACKAGE = 'dsh-zai-web-search-mcp'
+/** Hard cap on one update run; the pnpm child is killed past it. */
+const UPDATE_TIMEOUT_MS = 10 * 60_000
+/** Observed ndjson install stage -> floor percent. pnpm's ndjson reporter
+ * (verified live on the bundled runtime) emits no numeric progress field, so
+ * the stage itself keeps the bar moving; a real numeric `progress` value
+ * always wins over the floor when a pnpm version provides one. */
+const STAGE_PERCENT_FLOOR = { resolving: 8, fetching: 35, linking: 78, installing: 92 }
+/** Idle status body served before the first update run. */
+const IDLE_UPDATE_STATE = { running: false, stage: null, percent: 0, startedAt: null, error: null, resultVersion: null }
 
 /** Numeric compare of two loose semver strings ("1.9.2-rc.1" -> [1,9,2]). */
 function versionAtLeast(candidate, reference) {
@@ -90,7 +115,7 @@ export const PROVIDER_ID = 'zai-mcp'
 const TOOL_NAME = 'web_search_prime'
 
 const PROTOCOL_VERSION = '2025-06-18'
-const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.5' }
+const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.7' }
 /** Retried once per search: a streamable-HTTP session the server dropped. */
 const SESSION_LOST_HTTP = new Set([400, 404])
 
@@ -312,6 +337,11 @@ function startQuotaService(ctx, getApiKey) {
   let updateInfo = null
   let updateCheckedAt = 0
   let updateInflight = null
+  /** Self-update pipeline state (issue #3): tracker + child while running,
+   * kept after completion so /zai-update/status serves the final outcome. */
+  let updateTracker = null
+  let updateChild = null
+  let updateKillTimer = null
 
   /** Compare the running version with the npm latest; never throws. */
   async function checkUpdate() {
@@ -337,6 +367,103 @@ function startQuotaService(ctx, getApiKey) {
       return updateInfo
     })()
     return updateInflight
+  }
+
+  /** Start one self-update run. Single-flight; gated on a fresh registry
+   * check saying a newer release exists. Never throws. */
+  async function startUpdate() {
+    if (updateTracker?.state.running === true) {
+      return { ok: false, error: 'update already running', state: updateTracker.state }
+    }
+    try {
+      if (updateInfo === null || Date.now() - updateCheckedAt >= UPDATE_CHECK_INTERVAL_MS) await checkUpdate()
+    } catch { /* checkUpdate never rejects; kept defensive */ }
+    if (updateInfo?.available !== true) {
+      return {
+        ok: false,
+        error: 'no update available',
+        current: updateInfo?.current ?? CLIENT_INFO.version,
+        latest: updateInfo?.latest ?? null,
+      }
+    }
+    const dir = profileDirectory()
+    const invocation = pnpmInvocation()
+    updateTracker = createUpdateTracker()
+    const tracker = updateTracker
+    try {
+      // PNPM_CONFIG_MINIMUM_RELEASE_AGE=0: pnpm >= 11 ships a built-in 24h
+      // release-age cooldown (supply-chain default) that hides freshly
+      // published versions from range resolution — verified live: a range
+      // install minutes after a publish resolved the previous version. The
+      // pipeline exists to install that fresh release, so it opts out for
+      // this one explicit, user-initiated run only (process.env inherited).
+      const child = spawn(
+        invocation.command,
+        [...invocation.prefix, 'update', UPDATE_PACKAGE, '--latest', '--reporter=ndjson'],
+        {
+          cwd: dir,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, PNPM_CONFIG_MINIMUM_RELEASE_AGE: '0' },
+        },
+      )
+      updateChild = child
+      const absorb = (chunk) => { try { tracker.onLine(String(chunk)) } catch { /* progress parsing must never crash the update */ } }
+      child.stdout?.on('data', absorb)
+      child.stderr?.on('data', absorb)
+      child.once('error', (error) => {
+        try { tracker.spawnError(error) } catch { /* never throw in child events */ }
+        cleanupUpdateChild()
+      })
+      child.once('close', (code) => {
+        try {
+          tracker.finish(code, updateInfo?.latest ?? null)
+          if (code === 0) updateCheckedAt = 0 // /zai-quota recomputes update.available (and HMR re-reads the new package)
+          ctx.logger.info(`zai-web-search-mcp: self-update finished with code ${code}${tracker.state.resultVersion ? ` -> ${tracker.state.resultVersion}` : ''}${tracker.state.error ? ` (${tracker.state.error})` : ''}`)
+        } catch { /* never throw in child events */ }
+        cleanupUpdateChild()
+      })
+      updateKillTimer = setTimeout(() => {
+        try {
+          tracker.spawnError(`update exceeded ${Math.round(UPDATE_TIMEOUT_MS / 60_000)} minutes and was killed`)
+          child.kill('SIGKILL')
+        } catch { /* never throw from the watchdog */ }
+      }, UPDATE_TIMEOUT_MS)
+      updateKillTimer.unref?.()
+    } catch (error) {
+      tracker.spawnError(error instanceof Error ? error.message : String(error))
+    }
+    return { ok: tracker.state.running, state: tracker.state }
+  }
+
+  function cleanupUpdateChild() {
+    if (updateKillTimer !== null) { clearTimeout(updateKillTimer); updateKillTimer = null }
+    updateChild = null
+  }
+
+  /** The profile directory the update runs in (pnpm rewrites its node_modules). */
+  function profileDirectory() {
+    const fromEnv = process.env.DSH_PROFILE_DIR
+    if (typeof fromEnv === 'string' && fromEnv.length > 0) return fromEnv
+    return path.join(os.homedir(), '.dsh', 'profiles', process.env.DSH_PROFILE ?? 'desktop')
+  }
+
+  /** pnpm CLI resolution: DSH_PNPM wins (a .cjs/.mjs build is run with node);
+   * otherwise the dsh runtime's bundled pnpm via the bundled node, which works
+   * without any PATH setup; bare "pnpm" is the last resort. */
+  function pnpmInvocation() {
+    const configured = process.env.DSH_PNPM
+    if (typeof configured === 'string' && configured.length > 0) {
+      return /\.(cjs|mjs)$/.test(configured)
+        ? { command: process.env.DSH_NODE ?? 'node', prefix: [configured] }
+        : { command: configured, prefix: [] }
+    }
+    const home = os.homedir()
+    const runtimePnpm = path.join(home, '.dsh', 'dsh-runtimes', 'dsh-primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.cjs')
+    if (fs.existsSync(runtimePnpm)) {
+      const runtimeNode = path.join(home, '.dsh', 'dsh-runtimes', 'dsh-primary-runtime', 'dependencies', 'node', 'bin', 'node')
+      return { command: fs.existsSync(runtimeNode) ? runtimeNode : (process.env.DSH_NODE ?? 'node'), prefix: [runtimePnpm] }
+    }
+    return { command: process.env.DSH_NODE ?? 'pnpm', prefix: [] }
   }
   /** sessionId -> { provider, at }: the provider of the session's most recent
    * LLM request, learned from the agent/request waterfall. Expires so a
@@ -460,15 +587,135 @@ function startQuotaService(ctx, getApiKey) {
     },
   })
 
+  // Self-update pipeline (issue #3). Same auth wall as /zai-quota: both
+  // routes live behind the same webServer registration seam.
+  const disposeUpdateRoute = ctx.webServer.register({
+    kind: 'exact',
+    path: UPDATE_ROUTE_PATH,
+    async handler(request, response) {
+      let result
+      try {
+        result = request.method === 'POST' ? await startUpdate() : { ok: false, error: 'method not allowed: POST to start an update' }
+      } catch (error) {
+        result = { ok: false, error: String(error instanceof Error ? error.message : error) }
+      }
+      response.writeHead(result.ok === true ? 202 : 409, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      response.end(JSON.stringify(result))
+    },
+  })
+
+  const disposeUpdateStatusRoute = ctx.webServer.register({
+    kind: 'exact',
+    path: UPDATE_STATUS_ROUTE_PATH,
+    async handler(request, response) {
+      const body = JSON.stringify(updateTracker?.state ?? IDLE_UPDATE_STATE)
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      response.end(body)
+    },
+  })
+
   const timer = setInterval(() => { void snapshot() }, QUOTA_BACKGROUND_MS)
   timer.unref?.()
   ctx.effect(() => () => {
     clearInterval(timer)
     disposeRoute()
     disposeDiagRoute()
+    disposeUpdateRoute()
+    disposeUpdateStatusRoute()
+    // Kill an in-flight update child so plugin disposal never leaves pnpm running.
+    if (updateChild !== null) { try { updateChild.kill('SIGKILL') } catch { /* already gone */ } }
+    if (updateKillTimer !== null) { clearTimeout(updateKillTimer); updateKillTimer = null }
   }, 'zai-quota')
 
   return invalidate
+}
+
+/**
+ * Parse one line of `pnpm --reporter=ndjson` output into progress information.
+ * Verified live against the bundled runtime pnpm: lines are JSON objects
+ * carrying a logger name ("pnpm:stage", "pnpm:progress",
+ * "pnpm:fetching-progress", ...), a `stage` field on pnpm:stage lines
+ * ("resolution_started", "importing_done", ...) and a `status` field on
+ * progress lines ("resolved", "fetched", "imported"). A numeric `progress`
+ * (0..1) is honored when a pnpm version emits one; non-JSON lines (stderr
+ * chatter) parse to null. Exported for unit tests.
+ * @param rawLine - one raw ndjson/stdio line.
+ * @returns {{ stage: string|null, progress: number|null }} normalized stage
+ *   name (resolving|fetching|linking|installing) and numeric progress, or
+ *   null when the line carries no JSON progress information.
+ */
+export function parsePnpmProgressLine(rawLine) {
+  const line = String(rawLine).trim()
+  if (line.length === 0) return null
+  let parsed
+  try { parsed = JSON.parse(line) } catch { return null }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  let stage = null
+  for (const value of [parsed.stage, parsed.name, parsed.status, parsed.msg]) {
+    if (typeof value !== 'string') continue
+    const normalized = value.toLowerCase()
+    if (normalized === 'resolution_started' || normalized === 'resolution_done' || normalized.includes('resolv')) { stage = 'resolving'; break }
+    if (normalized.includes('fetch')) { stage = 'fetching'; break }
+    if (normalized === 'importing_started' || normalized === 'imported' || normalized.includes('link')) { stage = 'linking'; break }
+    if (normalized === 'importing_done' || normalized.includes('install')) { stage = 'installing'; break }
+  }
+  const progress = typeof parsed.progress === 'number' && Number.isFinite(parsed.progress) && parsed.progress >= 0 && parsed.progress <= 1
+    ? parsed.progress
+    : null
+  return { stage, progress }
+}
+
+/**
+ * Stateful progress tracker for one update run: consumes raw ndjson/stdio
+ * chunks, keeps the max numeric progress and the latest stage, and records
+ * the outcome. Exported (pure, no I/O) for unit tests; the host service wires
+ * child stdout/stderr into onLine and the close event into finish.
+ * @returns tracker with `state` ({ running, stage, percent, startedAt,
+ *   error, resultVersion }) plus onLine/spawnError/finish mutators.
+ */
+export function createUpdateTracker() {
+  const state = { running: true, stage: null, percent: 0, startedAt: Date.now(), error: null, resultVersion: null }
+  let percentMax = 0
+  let lastRawLine = ''
+  return {
+    state,
+    /** Absorb one raw stdout/stderr chunk (may contain several lines). */
+    onLine(chunk) {
+      for (const line of String(chunk).split('\n')) {
+        const parsed = parsePnpmProgressLine(line)
+        if (parsed === null) {
+          const trimmed = line.trim()
+          if (trimmed.length > 0) lastRawLine = trimmed.slice(0, 200)
+          continue
+        }
+        if (typeof parsed.stage === 'string') state.stage = parsed.stage
+        const numeric = parsed.progress !== null ? Math.round(parsed.progress * 100) : 0
+        const floor = parsed.stage !== null ? STAGE_PERCENT_FLOOR[parsed.stage] ?? 0 : 0
+        const candidate = Math.max(numeric, floor)
+        if (candidate > percentMax) {
+          percentMax = candidate
+          state.percent = Math.min(99, candidate) // 100 is reserved for a clean exit
+        }
+      }
+    },
+    /** A spawn-level failure (ENOENT, EACCES, watchdog kill): fail the run. */
+    spawnError(error) {
+      if (!state.running) return
+      state.running = false
+      state.error = error instanceof Error ? error.message : String(error)
+    },
+    /** The child exited: code 0 completes (percent 100, resultVersion),
+     * anything else records the last raw output line as the error. */
+    finish(code, latestVersion) {
+      state.running = false
+      if (code === 0) {
+        state.percent = 100
+        state.resultVersion = typeof latestVersion === 'string' && latestVersion.length > 0 ? latestVersion : null
+        return
+      }
+      state.error = lastRawLine.length > 0 ? lastRawLine : `pnpm update exited with code ${code}`
+    },
+  }
 }
 
 /** A search provider over the Z.ai streamable-HTTP MCP endpoint. */

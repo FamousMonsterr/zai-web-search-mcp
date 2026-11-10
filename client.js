@@ -18,7 +18,16 @@
 // - Registration mirrors the built-in stat pills exactly: a generator
 //   injection effect (yield per registration) plus the locale namespace;
 //   `inject` is optional (undefined normalizes to empty props).
-window.__ModuleLoader__.load({
+// v1.9.6: never throw from this top-level script. The boot graph can serve
+// this file twice — once inside a combo batch and once as the row's own
+// one-resource fallback URL — and an install whose package name differs from
+// the registration id below (the npm package vs the @local link) makes the
+// second execution reject as a duplicate. A throw here aborts the whole combo
+// batch and every user plugin registered after it, so the harness reports
+// "entries did not activate" on every start. A duplicate rejection is benign:
+// the first registration already owns the id and serves all consumers;
+// anything else is logged for diagnostics instead of crashing the boot.
+const registration = {
   id: '@local/zai-web-search-mcp',
   factory(require) {
     const React = require('react')
@@ -420,4 +429,10 @@ window.__ModuleLoader__.load({
       },
     }
   },
-})
+}
+
+try {
+  window.__ModuleLoader__.load(registration)
+} catch (error) {
+  console.warn('[zai-web-search-mcp] client registration skipped:', error && error.message)
+}

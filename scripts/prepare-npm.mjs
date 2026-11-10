@@ -17,9 +17,21 @@ const NPM_NAME = 'dsh-zai-web-search-mcp'
 fs.rmSync(out, { recursive: true, force: true })
 fs.mkdirSync(path.join(out, 'locale'), { recursive: true })
 
-for (const f of ['index.js', 'client.js', 'icon.svg', 'README.md', 'LICENSE']) {
+for (const f of ['index.js', 'icon.svg', 'README.md', 'LICENSE']) {
   fs.copyFileSync(path.join(root, f), path.join(out, f))
 }
+// client.js: the ModuleLoader registration id must equal the installed package
+// name. The boot graph row waits for a registration under the row's own id
+// (the package name); a mismatch makes the loader re-fetch the same script as
+// the row's fallback URL, the second execution rejects as a duplicate and the
+// entry fails with "did not activate" on every start. The @local source keeps
+// its name; the npm build is rewritten to the public name.
+const clientSrc = fs.readFileSync(path.join(root, 'client.js'), 'utf8')
+const client = clientSrc.replaceAll("'@local/zai-web-search-mcp'", `'${NPM_NAME}'`)
+if (client === clientSrc && clientSrc.includes("'@local/zai-web-search-mcp'")) {
+  throw new Error('client.js: expected the @local registration id to rewrite')
+}
+fs.writeFileSync(path.join(out, 'client.js'), client)
 for (const f of ['en.json', 'ru.json', 'zh.json']) {
   fs.copyFileSync(path.join(root, 'locale', f), path.join(out, 'locale', f))
 }

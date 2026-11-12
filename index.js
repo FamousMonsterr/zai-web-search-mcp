@@ -115,7 +115,7 @@ export const PROVIDER_ID = 'zai-mcp'
 const TOOL_NAME = 'web_search_prime'
 
 const PROTOCOL_VERSION = '2025-06-18'
-const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.7' }
+const CLIENT_INFO = { name: 'dsh-zai-web-search', version: '1.9.9' }
 /** Retried once per search: a streamable-HTTP session the server dropped. */
 const SESSION_LOST_HTTP = new Set([400, 404])
 
@@ -157,17 +157,14 @@ export async function apply(ctx) {
   // The standalone MCP tool bridge. Startup failures stay non-fatal so the
   // web_search provider above survives a transient endpoint outage; the
   // bridge logs and reconnects on its own schedule.
-  try {
-    await mcpClient.apply(ctx, {
+  mcpClient.apply(ctx, {
       serverName: SERVER_NAME,
       transport: 'streamable-http',
       url: MCP_URL,
       headers: { Authorization: `Bearer ${apiKey}` },
       failOnStartupError: false,
     })
-  } catch (error) {
-    ctx.logger.error(`zai-web-search-mcp: MCP tool bridge failed to start (web_search keeps working): ${String(error)}`)
-  }
+    .catch((error) => ctx.logger.error(`zai-web-search-mcp: MCP tool bridge failed to start (web_search keeps working): ${String(error)}`))
 
   // The web-reader fetch provider (selected as the built-in web_fetch backend
   // by this bundle's patch: fetchProvider "zai-reader"). Same session shape
@@ -181,17 +178,14 @@ export async function apply(ctx) {
 
   // Reader MCP tool bridge: mcp__zai-reader__webReader. Non-fatal like the
   // search bridge; the fetch provider above keeps working either way.
-  try {
-    await mcpClient.apply(ctx, {
+  mcpClient.apply(ctx, {
       serverName: READER_SERVER_NAME,
       transport: 'streamable-http',
       url: READER_MCP_URL,
       headers: { Authorization: `Bearer ${apiKey}` },
       failOnStartupError: false,
     })
-  } catch (error) {
-    ctx.logger.error(`zai-web-search-mcp: reader MCP tool bridge failed to start (web_fetch keeps working): ${String(error)}`)
-  }
+    .catch((error) => ctx.logger.error(`zai-web-search-mcp: reader MCP tool bridge failed to start (web_fetch keeps working): ${String(error)}`))
 
   // Vision MCP tool bridge: mcp__zai-vision__<name>. A stdio child through
   // npx, so it needs Node >= 22 and npx on the host PATH; a cold npx cache
@@ -199,8 +193,7 @@ export async function apply(ctx) {
   // non-fatal and reconnects (prewarm once: Z_AI_API_KEY=... npx -y
   // @z_ai/mcp-server@latest). The child snapshots the key at spawn time, so
   // a rotated key reaches it after the plugin reloads.
-  try {
-    await mcpClient.apply(ctx, {
+  mcpClient.apply(ctx, {
       serverName: VISION_SERVER_NAME,
       transport: 'stdio',
       command: 'npx',
@@ -208,24 +201,19 @@ export async function apply(ctx) {
       env: { Z_AI_API_KEY: apiKey, Z_AI_MODE: 'ZAI' },
       failOnStartupError: false,
     })
-  } catch (error) {
-    ctx.logger.error(`zai-web-search-mcp: vision MCP bridge failed to start (search, reader and quota keep working): ${String(error)}`)
-  }
+    .catch((error) => ctx.logger.error(`zai-web-search-mcp: vision MCP bridge failed to start (search, reader and quota keep working): ${String(error)}`))
 
   // Zread MCP tool bridge: mcp__zai-zread__search_doc / read_file /
   // get_repo_structure over public GitHub repositories. Non-fatal like the
   // other bridges; nothing else in the plugin depends on it.
-  try {
-    await mcpClient.apply(ctx, {
+  mcpClient.apply(ctx, {
       serverName: ZREAD_SERVER_NAME,
       transport: 'streamable-http',
       url: ZREAD_MCP_URL,
       headers: { Authorization: `Bearer ${apiKey}` },
       failOnStartupError: false,
     })
-  } catch (error) {
-    ctx.logger.error(`zai-web-search-mcp: zread MCP bridge failed to start (everything else keeps working): ${String(error)}`)
-  }
+    .catch((error) => ctx.logger.error(`zai-web-search-mcp: zread MCP bridge failed to start (everything else keeps working): ${String(error)}`))
 }
 
 /**

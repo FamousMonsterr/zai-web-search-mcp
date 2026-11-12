@@ -1,6 +1,6 @@
 {
   "name": "@local/zai-web-search-mcp",
-  "version": "1.9.7",
+  "version": "1.9.9",
   "private": true,
   "type": "module",
   "exports": {
